@@ -4,6 +4,12 @@ import requests
 import json
 import re
 import os
+from PyQt5 import QtWidgets
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QLabel, QPushButton, QTextEdit, QVBoxLayout,
+    QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar
+)
+import sys
 
 def save_api_key(api_key):
     with open("gemini_config.json", "w") as f:
@@ -90,7 +96,8 @@ def add_to_anki(parsed_word, deck_name):
         "error" in parsed_word or
         any(not str(parsed_word.get(field, "")).strip() for field in required_fields)
     ):
-        return False, "❌ Cannot create note: required fields missing or Gemini failed."
+        print(f"[DEBUG] Incomplete Gemini response for word. Full content:\n{json.dumps(parsed_word, indent=2, ensure_ascii=False)}")
+        return False, "Cannot create note: required fields missing or Gemini failed."
 
     fields = {
         "base_d": str(parsed_word.get("base_d", "") or ""),
@@ -155,94 +162,102 @@ def is_duplicate(base_d_value):
 
 # === GUI ===
 def run_gui():
-    root = tk.Tk()
-    root.title("German ↔ Anki Word Adder")
+    app = QApplication(sys.argv)
+    window = QWidget()
+    window.setWindowTitle("Danki")
 
     global API_KEY
     API_KEY = load_api_key()
     if not API_KEY:
-        API_KEY = simpledialog.askstring("Gemini API Key", "Enter your Gemini API Key:")
-        if not API_KEY:
-            messagebox.showerror("Missing API Key", "API key is required to use the app.")
-            root.destroy()
+        API_KEY, ok = QInputDialog.getText(window, "Gemini API Key", "Enter your Gemini API Key:")
+        if not ok or not API_KEY:
+            QMessageBox.critical(window, "Missing API Key", "API key is required to use the app.")
             return
         save_api_key(API_KEY)
 
+    layout = QVBoxLayout()
+
     # Deck Dropdown
-    deck_frame = tk.Frame(root)
-    deck_frame.pack()
-
-    tk.Label(deck_frame, text="Select Anki Deck:").pack(side=tk.LEFT)
-
-    deck_var = tk.StringVar()
+    deck_layout = QHBoxLayout()
+    deck_label = QLabel("Select Anki Deck:")
+    deck_combo = QComboBox()
     deck_list = get_anki_decks()
-    deck_menu = ttk.Combobox(deck_frame, textvariable=deck_var, values=deck_list, state="readonly", width=30)
-    deck_menu.pack(side=tk.LEFT, padx=5)
-    if deck_list:
-        deck_var.set(deck_list[0])
+    deck_combo.addItems(deck_list)
+    deck_layout.addWidget(deck_label)
+    deck_layout.addWidget(deck_combo)
 
+    refresh_btn = QPushButton("Refresh")
     def refresh_decks():
-        updated_decks = get_anki_decks()
-        deck_menu['values'] = updated_decks
-        if updated_decks:
-            deck_var.set(updated_decks[0])
+        deck_combo.clear()
+        updated = get_anki_decks()
+        deck_combo.addItems(updated)
+    refresh_btn.clicked.connect(refresh_decks)
+    deck_layout.addWidget(refresh_btn)
 
-    tk.Button(deck_frame, text="🔄 Refresh", command=refresh_decks).pack(side=tk.LEFT)
+    layout.addLayout(deck_layout)
 
-    # Word input area
-    tk.Label(root, text="Enter German words (comma or newline separated):").pack()
-    input_text = scrolledtext.ScrolledText(root, width=50, height=8)
-    input_text.pack(pady=5)
+    # Input box
+    layout.addWidget(QLabel("Enter German words (comma or newline separated):"))
+    input_box = QTextEdit()
+    input_box.setFixedHeight(200)
+    layout.addWidget(input_box)
 
     # Output log
-    output_box = scrolledtext.ScrolledText(root, width=50, height=10, state='disabled')
-    output_box.pack(pady=10)
+    output_box = QTextEdit()
+    output_box.setReadOnly(True)
+    output_box.setFixedHeight(100)
+    layout.addWidget(output_box)
 
-    # Action
+    # Progress bar
+    progress_bar = QProgressBar()
+    progress_bar.setValue(0)
+    layout.addWidget(progress_bar)
+
+    # Process button
     def process_words():
-        words_raw = input_text.get("1.0", tk.END)
-        selected_deck = deck_var.get()
+        words_raw = input_box.toPlainText()
+        selected_deck = deck_combo.currentText()
         words = re.split(r"[,\n]", words_raw)
         words = [w.strip() for w in words if w.strip()]
 
-        output_box.configure(state='normal')
-        output_box.delete("1.0", tk.END)
+        output_box.clear()
+        progress_bar.setMaximum(len(words))
+        progress_bar.setValue(0)
 
         for word in words:
-            output_box.insert(tk.END, f"🔍 Processing: {word}...\n")
-            root.update()
+            output_box.append(f"Processing: {word}...")
+            QApplication.processEvents()
             if is_duplicate(word):
-                output_box.insert(tk.END, f"⚠️ Skipped duplicate: {word}\n\n")
+                output_box.append(f"Skipped duplicate: {word}\n")
+                progress_bar.setValue(progress_bar.value() + 1)
                 continue
-            
-            # Retry Gemini once if it fails
+
             for attempt in range(4):
                 gemini_data = query_gemini(word)
                 if "error" not in gemini_data:
+                    print(f"[DEBUG] Gemini raw data for '{word}':\n{json.dumps(gemini_data, indent=2, ensure_ascii=False)}")
                     break
-                print(f"[DEBUG] Gemini failed (attempt {attempt+1}) for '{word}': {gemini_data['error']}")
 
             if "error" in gemini_data:
-                print(f"[DEBUG] Skipping '{word}' due to repeated Gemini failure.\n")
-                print(f"[DEBUG] Gemini final response for '{word}':", gemini_data)
+                output_box.append(f"Gemini failed for: {word}\n")
+                progress_bar.setValue(progress_bar.value() + 1)
                 continue
 
             success, msg = add_to_anki(gemini_data, selected_deck)
+            status = "Success" if success else "Failed"
+            output_box.append(f"{status} {msg}\n")
+            progress_bar.setValue(progress_bar.value() + 1)
 
-            # [DEBUG] Print Gemini output when add_to_anki fails
-            if not success:
-                print(f"[DEBUG] Gemini output for failed word '{word}':\n{json.dumps(gemini_data, indent=2, ensure_ascii=False)}")
+        output_box.append("Done!")
 
-            status = "✅" if success else "❌"
-            output_box.insert(tk.END, f"{status} {msg}\n\n")
-            output_box.see(tk.END)
+    add_btn = QPushButton("Add Words to Deck")
+    add_btn.clicked.connect(process_words)
+    layout.addWidget(add_btn)
 
-        output_box.insert(tk.END, "🎉 Done!\n")
-        output_box.configure(state='disabled')
-
-    tk.Button(root, text="➕ Add Words to Anki", command=process_words).pack(pady=15)
-
-    root.mainloop()
+    window.setLayout(layout)
+    window.resize(500, 500)
+    window.show()
+    sys.exit(app.exec_())
 
 # === RUN ===
 if __name__ == "__main__":
