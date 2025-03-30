@@ -19,7 +19,7 @@ Danki is a lightweight macOS app that helps you automate German vocabulary acqui
 
 ### 1. Clone the Repo
 ```bash
-[git clone https://github.com/your-username/danki.git](https://github.com/udaysidhu99/danki)
+https://github.com/udaysidhu99/danki
 cd danki
 ```
 
