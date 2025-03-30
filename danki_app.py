@@ -7,19 +7,20 @@ import os
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QTextEdit, QVBoxLayout,
-    QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit
+    QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit, QCheckBox
 )
 import sys
 
-def save_api_key(api_key):
+def save_api_key(api_key, allow_duplicates=True):
     with open("gemini_config.json", "w") as f:
-        json.dump({"api_key": api_key}, f)
+        json.dump({"api_key": api_key, "allow_duplicates": allow_duplicates}, f)
 
 def load_api_key():
     if os.path.exists("gemini_config.json"):
         with open("gemini_config.json") as f:
-            return json.load(f).get("api_key")
-    return None
+            config = json.load(f)
+            return config.get("api_key"), config.get("allow_duplicates", True)
+    return None, True
 
 # === CONFIG ===
 NOTE_TYPE = "German Auto"  # ← trailing space
@@ -104,7 +105,7 @@ def query_gemini(word):
         return {"error": str(e)}
 
 # === ANKI ADD ===
-def add_to_anki(parsed_word, deck_name):
+def add_to_anki(parsed_word, deck_name, allow_duplicates):
     required_fields = ["base_d", "base_e", "s1"]
     if (
         not parsed_word or
@@ -145,7 +146,7 @@ def add_to_anki(parsed_word, deck_name):
                 "deckName": deck_name,
                 "modelName": NOTE_TYPE,
                 "fields": fields,
-                "options": {"allowDuplicate": True},
+                "options": {"allowDuplicate": allow_duplicates},
                 "tags": ["auto-added"]
             }
         }
@@ -212,13 +213,13 @@ def run_gui():
     main_layout = QVBoxLayout()
 
     global API_KEY
-    API_KEY = load_api_key()
+    API_KEY, allow_duplicates = load_api_key()
     if not API_KEY:
         API_KEY, ok = QInputDialog.getText(window, "Gemini API Key", "Enter your Gemini API Key:")
         if not ok or not API_KEY:
             QMessageBox.critical(window, "Missing API Key", "API key is required to use the app.")
             return
-        save_api_key(API_KEY)
+        save_api_key(API_KEY, allow_duplicates)
 
     # Deck Dropdown
     deck_layout = QHBoxLayout()
@@ -296,7 +297,7 @@ def run_gui():
                 progress_bar.setValue(progress_bar.value() + 1)
                 continue
 
-            success, msg = add_to_anki(gemini_data, selected_deck)
+            success, msg = add_to_anki(gemini_data, selected_deck, allow_duplicates)
             status = "Success" if success else "Failed"
             output_box.append(f"{status} {msg}\n")
             progress_bar.setValue(progress_bar.value() + 1)
@@ -320,15 +321,20 @@ def run_gui():
     api_input.setPlaceholderText(API_KEY[:5] + "..." if API_KEY else "")
     save_btn = QPushButton("Save API Key")
 
+    allow_dupes_checkbox = QCheckBox("Allow Duplicate Notes")
+    allow_dupes_checkbox.setChecked(allow_duplicates)
+    allow_dupes_checkbox.stateChanged.connect(lambda _: save_api_key(API_KEY, allow_dupes_checkbox.isChecked()))
+
     def save_preferences():
         new_key = api_input.text().strip()
-        if new_key:
-            save_api_key(new_key)
-            QMessageBox.information(window, "Saved", "Gemini API Key updated successfully.")
-            api_input.clear()
-            api_input.setPlaceholderText(new_key[:5] + "...")
-        else:
-            QMessageBox.warning(window, "Empty Input", "API key cannot be empty.")
+        if not new_key:
+            QMessageBox.warning(window, "Missing API Key", "The Gemini API Key cannot be blank.")
+            return
+        new_allow_dupes = allow_dupes_checkbox.isChecked()
+        save_api_key(new_key, new_allow_dupes)
+        QMessageBox.information(window, "Saved", "Preferences updated successfully.")
+        api_input.clear()
+        api_input.setPlaceholderText(new_key[:5] + "...")
 
     save_btn.clicked.connect(save_preferences)
 
@@ -336,6 +342,13 @@ def run_gui():
     api_input_layout.addWidget(api_input)
     api_input_layout.addWidget(save_btn)
     preferences_main_layout.addLayout(api_input_layout)
+    preferences_main_layout.addWidget(allow_dupes_checkbox)
+
+    disclaimer = QLabel("Note: Duplicate detection is handled by Anki.\nIt checks across all decks using the same note type.")
+    disclaimer.setWordWrap(True)
+    disclaimer.setStyleSheet("color: gray; font-size: 10px;")
+    preferences_main_layout.addWidget(disclaimer)
+
     preferences_main_layout.addStretch()
 
     preferences_tab.setLayout(preferences_main_layout)
