@@ -84,6 +84,7 @@ def query_gemini(word):
 
         # Extract s1/s1e
         s1_raw = parsed.get("s1", "")
+        print(f"[DEBUG] Raw s1: {s1_raw}")
         if "(" in s1_raw and ")" in s1_raw:
             parsed["s1"] = s1_raw.split("(")[0].strip()
             parsed["s1e"] = s1_raw.split("(")[1].rstrip(")").strip()
@@ -94,11 +95,17 @@ def query_gemini(word):
         s2_raw = parsed.get("s2", "")
         if "(" in s2_raw and ")" in s2_raw:
             parsed["s2"] = s2_raw.split("(")[0].strip()
+            parsed["s2e"] = s2_raw.split("(")[1].rstrip(")").strip()
+        else:
+            parsed["s2e"] = ""
         
         # Clean up s3
         s3_raw = parsed.get("s3", "")
         if "(" in s3_raw and ")" in s3_raw:
             parsed["s3"] = s3_raw.split("(")[0].strip()
+            parsed["s3e"] = s3_raw.split("(")[1].rstrip(")").strip()
+        else:
+            parsed["s3e"] = ""
 
         # Ensure full_d is a string
         if isinstance(parsed.get("full_d"), dict):
@@ -199,8 +206,11 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
         "full_d": parsed_word.get("full_d") if parsed_word.get("full_d") is not None else "",
         "audio_text_d": parsed_word.get("full_d") if parsed_word.get("full_d") is not None else "",
         "s1": str(parsed_word.get("s1", "") or ""),
+        "s1e": str(parsed_word.get("s1e", "") or ""),
         "s2": str(parsed_word.get("s2", "") or ""),
-        "s3": str(parsed_word.get("s3", "") or "")
+        "s2e": str(parsed_word.get("s2e", "") or ""),
+        "s3": str(parsed_word.get("s3", "") or ""),
+        "s3e": str(parsed_word.get("s3e", "") or "")
     }
 
     payload = {
@@ -449,4 +459,4 @@ def run_gui():
 
 # === RUN ===
 if __name__ == "__main__":
-    run_gui()
+    run_gui()   
