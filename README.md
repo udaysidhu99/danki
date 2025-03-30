@@ -1,4 +1,4 @@
-# Danki – German Vocabulary to Anki with Gemini
+# Danki – German Vocabulary to Anki 
 
 Danki is a lightweight macOS app that helps you automate German vocabulary acquisition by generating high-quality word data using Google Gemini and sending it straight into your Anki deck — complete with articles, conjugations, and natural example sentences.
 
@@ -90,8 +90,6 @@ Each note contains:
 ---
 
 
----
+## Why I Built This
 
-## Credits
-
-Created with care by [Your Name]. Inspired by the joy of language learning.
+While learning German, I often came across new words in daily life — on signs, in conversations, or while watching something. I would quickly look them up and understand the meaning, but over time, I’d forget them. I realised how helpful it would be to immediately add these words to my Anki deck for spaced repetition. So, I started jotting down just the German words on my phone. With this little utility, I can now easily paste those collected words into the GUI, and the app fetches all the necessary info and adds them to a dedicated Anki deck — ready for review and practice.
