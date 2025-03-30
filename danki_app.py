@@ -26,6 +26,13 @@ def load_api_key():
             return config.get("api_key"), config.get("allow_duplicates", True)
     return None, True
 
+def is_connected():
+    try:
+        requests.get("https://www.google.com", timeout=3)
+        return True
+    except:
+        return False
+
 # === CONFIG ===
 NOTE_TYPE = "German Auto"  # ← trailing space
 ANKI_ENDPOINT = "http://localhost:8765"
@@ -35,7 +42,9 @@ def query_gemini(word):
     global API_KEY
     GEMINI_ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
     prompt = (
-        f"You are a helpful German language assistant. For the word: **{word}**, provide the following structured information:\n\n"
+        f"You are a helpful German language assistant. For the word: **{word}**, provide the following structured information.\n"
+        "If the word is not a valid German word, return this JSON exactly:\n"
+        "{\"error\": \"Not a valid German word\"}\n\n"
         "1. **base_d**: The original German word\n"
         "2. **base_e**: The English translation(s)\n"
         "3. **artikel_d**: The definite article if the word is a noun (e.g., \"der\", \"die\", \"das\"). Leave empty if not a noun.\n"
@@ -260,9 +269,11 @@ def generate_tts_audio(text, filename_hint):
 def get_anki_decks():
     payload = {"action": "deckNames", "version": 6}
     try:
-        response = requests.post(ANKI_ENDPOINT, json=payload)
-        return response.json().get("result", [])
+        response = requests.post(ANKI_ENDPOINT, json=payload, timeout=5)
+        decks = response.json().get("result", [])
+        return decks
     except Exception:
+        QMessageBox.warning(None, "Anki not responding", "Anki is not running or AnkiConnect is not enabled.")
         return []
 # === Check for duplicates ===
 def is_duplicate(base_d_value, base_a_value):
@@ -335,7 +346,11 @@ def run_gui():
     main_layout.addLayout(deck_layout)
 
     # Input box
-    main_layout.addWidget(QLabel("Enter German words (comma or newline separated):"))
+    input_label = QLabel("Enter German words (comma or newline separated):")
+    disclaimer = QLabel("Submitting too many words at once may exceed the request limit of Gemini’s free tier.")
+    disclaimer.setStyleSheet("color: grey; font-size: 10px;")
+    main_layout.addWidget(input_label)
+    main_layout.addWidget(disclaimer)
     input_box = QTextEdit()
     input_box.setFixedHeight(200)
     main_layout.addWidget(input_box)
@@ -362,16 +377,26 @@ def run_gui():
 
     # Process button
     def process_words():
+        if not is_connected():
+            QMessageBox.critical(window, "No Internet", "An internet connection is required to use Gemini.")
+            return
+
         words_raw = input_box.toPlainText()
         selected_deck = deck_combo.currentText()
         words = re.split(r"[,\n]", words_raw)
         words = [w.strip() for w in words if w.strip()]
+        valid_word_pattern = re.compile(r"^[a-zA-ZäöüÄÖÜß\s\-]+$")
 
         output_box.clear()
         progress_bar.setMaximum(len(words))
         progress_bar.setValue(0)
 
         for word in words:
+            if not valid_word_pattern.match(word):
+                output_box.append(f"'{word}' contains invalid characters. Skipping.\n")
+                progress_bar.setValue(progress_bar.value() + 1)
+                continue
+
             output_box.append(f"Processing: {word}...")
             QApplication.processEvents()
 
@@ -396,7 +421,7 @@ def run_gui():
             output_box.append(f"{status} {msg}\n")
             progress_bar.setValue(progress_bar.value() + 1)
 
-        output_box.append("Done!")
+            output_box.append("Done!")
 
     add_btn = QPushButton("Add Words to Deck")
     add_btn.clicked.connect(process_words)
