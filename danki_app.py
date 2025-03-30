@@ -4,6 +4,10 @@ import requests
 import json
 import re
 import os
+import tempfile
+import base64
+import asyncio
+from edge_tts import Communicate
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QTextEdit, QVBoxLayout,
@@ -128,6 +132,29 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
         else:
             parsed_word["full_d"] = parsed_word.get("base_d", "")
 
+    audio_fields = []
+    base_d = parsed_word.get("base_d", "").strip().replace(" ", "_")
+    s1 = parsed_word.get("s1", "").strip()
+
+    base_audio = generate_tts_audio(base_d, os.urandom(8).hex())
+    if base_audio:
+        audio_fields.append({
+            "url": None,
+            "filename": base_audio["filename"],
+            "data": base_audio["data"],
+            "fields": ["base_a"]
+        })
+
+    if s1:
+        s1_audio = generate_tts_audio(s1, os.urandom(8).hex())
+        if s1_audio:
+            audio_fields.append({
+                "url": None,
+                "filename": s1_audio["filename"],
+                "data": s1_audio["data"],
+                "fields": ["s1a"]
+            })
+
     fields = {
         "base_d": str(parsed_word.get("base_d", "") or ""),
         "base_e": str(parsed_word.get("base_e", "") or ""),
@@ -147,7 +174,8 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
                 "modelName": NOTE_TYPE,
                 "fields": fields,
                 "options": {"allowDuplicate": allow_duplicates},
-                "tags": ["auto-added"]
+                "tags": ["auto-added"],
+                "audio": audio_fields
             }
         }
     }
@@ -161,6 +189,24 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
             return False, result["error"]
     except Exception as e:
         return False, str(e)
+
+def generate_tts_audio(text, filename_hint):
+    try:
+        filename = f"sapi5js-{filename_hint}.mp3"
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        communicate = Communicate(text, "de-DE-KatjaNeural")
+        loop.run_until_complete(communicate.save(filename))
+        with open(filename, "rb") as f:
+            audio_data = base64.b64encode(f.read()).decode("utf-8")
+        os.remove(filename)
+        return {
+            "filename": filename,
+            "data": audio_data
+        }
+    except Exception as e:
+        print(f"[ERROR] TTS generation failed for '{filename_hint}': {e}")
+        return None
 
 # === FETCH DECKS FROM ANKI ===
 def get_anki_decks():
