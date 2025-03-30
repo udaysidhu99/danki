@@ -7,7 +7,7 @@ import os
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QTextEdit, QVBoxLayout,
-    QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar
+    QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit
 )
 import sys
 
@@ -191,7 +191,25 @@ def is_duplicate(base_d_value, base_a_value):
 def run_gui():
     app = QApplication(sys.argv)
     window = QWidget()
-    window.setWindowTitle("Danki")
+
+    # Menu bar with Preferences
+    menu_bar = QtWidgets.QMenuBar()
+    preferences_menu = menu_bar.addMenu("Preferences")
+
+    def open_preferences():
+        QMessageBox.information(window, "Preferences", "Preferences dialog would open here.")
+
+    pref_action = QtWidgets.QAction("Open Preferences", window)
+    pref_action.triggered.connect(open_preferences)
+    preferences_menu.addAction(pref_action)
+
+    layout = QVBoxLayout()
+
+    tabs = QtWidgets.QTabWidget()
+
+    # Main tab
+    main_tab = QWidget()
+    main_layout = QVBoxLayout()
 
     global API_KEY
     API_KEY = load_api_key()
@@ -201,8 +219,6 @@ def run_gui():
             QMessageBox.critical(window, "Missing API Key", "API key is required to use the app.")
             return
         save_api_key(API_KEY)
-
-    layout = QVBoxLayout()
 
     # Deck Dropdown
     deck_layout = QHBoxLayout()
@@ -221,24 +237,33 @@ def run_gui():
     refresh_btn.clicked.connect(refresh_decks)
     deck_layout.addWidget(refresh_btn)
 
-    layout.addLayout(deck_layout)
+    main_layout.addLayout(deck_layout)
 
     # Input box
-    layout.addWidget(QLabel("Enter German words (comma or newline separated):"))
+    main_layout.addWidget(QLabel("Enter German words (comma or newline separated):"))
     input_box = QTextEdit()
     input_box.setFixedHeight(200)
-    layout.addWidget(input_box)
+    main_layout.addWidget(input_box)
 
     # Output log
     output_box = QTextEdit()
     output_box.setReadOnly(True)
     output_box.setFixedHeight(100)
-    layout.addWidget(output_box)
+    main_layout.addWidget(output_box)
+
+    # Clear button
+    def clear_text_boxes():
+        input_box.clear()
+        output_box.clear()
+
+    clear_btn = QPushButton("Clear")
+    clear_btn.clicked.connect(clear_text_boxes)
+    main_layout.addWidget(clear_btn)
 
     # Progress bar
     progress_bar = QProgressBar()
     progress_bar.setValue(0)
-    layout.addWidget(progress_bar)
+    main_layout.addWidget(progress_bar)
 
     # Process button
     def process_words():
@@ -280,7 +305,45 @@ def run_gui():
 
     add_btn = QPushButton("Add Words to Deck")
     add_btn.clicked.connect(process_words)
-    layout.addWidget(add_btn)
+    main_layout.addWidget(add_btn)
+
+    main_tab.setLayout(main_layout)
+
+    # Preferences tab (currently empty)
+    preferences_tab = QWidget()
+    preferences_main_layout = QVBoxLayout()
+
+    api_label = QLabel("Gemini API Key:")
+
+    api_input_layout = QHBoxLayout()
+    api_input = QLineEdit()
+    api_input.setPlaceholderText(API_KEY[:5] + "..." if API_KEY else "")
+    save_btn = QPushButton("Save API Key")
+
+    def save_preferences():
+        new_key = api_input.text().strip()
+        if new_key:
+            save_api_key(new_key)
+            QMessageBox.information(window, "Saved", "Gemini API Key updated successfully.")
+            api_input.clear()
+            api_input.setPlaceholderText(new_key[:5] + "...")
+        else:
+            QMessageBox.warning(window, "Empty Input", "API key cannot be empty.")
+
+    save_btn.clicked.connect(save_preferences)
+
+    api_input_layout.addWidget(api_label)
+    api_input_layout.addWidget(api_input)
+    api_input_layout.addWidget(save_btn)
+    preferences_main_layout.addLayout(api_input_layout)
+    preferences_main_layout.addStretch()
+
+    preferences_tab.setLayout(preferences_main_layout)
+
+    tabs.addTab(main_tab, "Main")
+    tabs.addTab(preferences_tab, "Preferences")
+
+    layout.addWidget(tabs)
 
     window.setLayout(layout)
     window.resize(500, 500)
