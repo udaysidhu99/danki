@@ -44,7 +44,9 @@ def query_gemini(word):
         "6. **praeteritum**: Simple past tense (3rd person singular), e.g., \"lief\"\n"
         "7. **perfekt**: Present perfect form, e.g., \"ist gelaufen\"\n"
         "8. **full_d**: A combined string of the above three conjugation forms, e.g., \"läuft, lief, ist gelaufen\"\n"
-        "9. **s1**: A natural German sentence using the word, with its English translation in parentheses\n\n"
+        "9. **s1**: A natural German sentence using the word, with its English translation in parentheses.\n"
+        "10. **s2** (optional): A second sentence only if the word has a different context.\n"
+        "11. **s3** (optional): A third sentence to demonstrate nuance or complexity, if useful.\n\n"
         "Example:\n"
         "```json\n"
         "{\n"
@@ -56,7 +58,9 @@ def query_gemini(word):
         "  \"praeteritum\": \"lief\",\n"
         "  \"perfekt\": \"ist gelaufen\",\n"
         "  \"full_d\": \"läuft, lief, ist gelaufen\",\n"
-        "  \"s1\": \"Ich laufe jeden Morgen im Park. (I run every morning in the park.)\"\n"
+        "  \"s1\": \"Ich laufe jeden Morgen im Park. (I run every morning in the park.)\",\n"
+        "  \"s2\": \"Er läuft zur Arbeit, weil er den Bus verpasst hat. (He runs to work because he missed the bus.)\",\n"
+        "  \"s3\": \"Der Hund läuft im Garten herum. (The dog is running around in the garden.)\"\n"
         "}\n"
         "```"
     )
@@ -85,6 +89,16 @@ def query_gemini(word):
             parsed["s1e"] = s1_raw.split("(")[1].rstrip(")").strip()
         else:
             parsed["s1e"] = ""
+        
+        # Clean up s2
+        s2_raw = parsed.get("s2", "")
+        if "(" in s2_raw and ")" in s2_raw:
+            parsed["s2"] = s2_raw.split("(")[0].strip()
+        
+        # Clean up s3
+        s3_raw = parsed.get("s3", "")
+        if "(" in s3_raw and ")" in s3_raw:
+            parsed["s3"] = s3_raw.split("(")[0].strip()
 
         # Ensure full_d is a string
         if isinstance(parsed.get("full_d"), dict):
@@ -133,10 +147,12 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
             parsed_word["full_d"] = parsed_word.get("base_d", "")
 
     audio_fields = []
-    base_d = parsed_word.get("base_d", "").strip().replace(" ", "_")
+    base_d = parsed_word.get("base_d", "").strip()
     s1 = parsed_word.get("s1", "").strip()
-
-    base_audio = generate_tts_audio(base_d, os.urandom(8).hex())
+    s2 = parsed_word.get("s2", "").strip()
+    s3 = parsed_word.get("s3", "").strip()
+    print(base_d)
+    base_audio = generate_tts_audio(base_d.replace(" ", ""), os.urandom(8).hex())
     if base_audio:
         audio_fields.append({
             "url": None,
@@ -155,6 +171,26 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
                 "fields": ["s1a"]
             })
 
+    if s2:
+        s2_audio = generate_tts_audio(s2, os.urandom(8).hex())
+        if s2_audio:
+            audio_fields.append({
+                "url": None,
+                "filename": s2_audio["filename"],
+                "data": s2_audio["data"],
+                "fields": ["s2a"]
+            })
+
+    if s3:
+        s3_audio = generate_tts_audio(s3, os.urandom(8).hex())
+        if s3_audio:
+            audio_fields.append({
+                "url": None,
+                "filename": s3_audio["filename"],
+                "data": s3_audio["data"],
+                "fields": ["s3a"]
+            })
+
     fields = {
         "base_d": str(parsed_word.get("base_d", "") or ""),
         "base_e": str(parsed_word.get("base_e", "") or ""),
@@ -162,7 +198,9 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
         "plural_d": str(parsed_word.get("plural_d", "") or ""),
         "full_d": parsed_word.get("full_d") if parsed_word.get("full_d") is not None else "",
         "audio_text_d": parsed_word.get("full_d") if parsed_word.get("full_d") is not None else "",
-        "s1": str(parsed_word.get("s1", "") or "")
+        "s1": str(parsed_word.get("s1", "") or ""),
+        "s2": str(parsed_word.get("s2", "") or ""),
+        "s3": str(parsed_word.get("s3", "") or "")
     }
 
     payload = {
