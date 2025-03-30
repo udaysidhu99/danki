@@ -22,32 +22,39 @@ def load_api_key():
     return None
 
 # === CONFIG ===
-NOTE_TYPE = "German Auto "  # ← trailing space
+NOTE_TYPE = "German Auto"  # ← trailing space
 ANKI_ENDPOINT = "http://localhost:8765"
 
 # === GEMINI QUERY ===
 def query_gemini(word):
     global API_KEY
     GEMINI_ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
-    prompt = f"""
-You are a helpful German language assistant. For the word: **{word}**, provide the following details:
-
-1. English meaning
-2. Article (if noun)
-3. Plural form (if noun)
-4. Conjugation for verbs: just one representative form each from **Präsens**, **Präteritum**, and **Perfekt** (e.g., "macht ab, machte ab, hat abgemacht")
-5. One natural example sentence (German + English in parentheses)
-
-Reply in JSON format like this (inside a ```json code block):
-{{
-  "base_d": "",
-  "base_e": "",
-  "artikel_d": "",
-  "plural_d": "",
-  "full_d": "",
-  "s1": "Wir gehen ins Kino. (We are going to the cinema.)"
-}}
-"""
+    prompt = (
+        f"You are a helpful German language assistant. For the word: **{word}**, provide the following structured information:\n\n"
+        "1. **base_d**: The original German word\n"
+        "2. **base_e**: The English translation(s)\n"
+        "3. **artikel_d**: The definite article if the word is a noun (e.g., \"der\", \"die\", \"das\"). Leave empty if not a noun.\n"
+        "4. **plural_d**: The plural form (for nouns). Leave empty if not a noun.\n"
+        "5. **praesens**: Present tense (3rd person singular), e.g., \"läuft\"\n"
+        "6. **praeteritum**: Simple past tense (3rd person singular), e.g., \"lief\"\n"
+        "7. **perfekt**: Present perfect form, e.g., \"ist gelaufen\"\n"
+        "8. **full_d**: A combined string of the above three conjugation forms, e.g., \"läuft, lief, ist gelaufen\"\n"
+        "9. **s1**: A natural German sentence using the word, with its English translation in parentheses\n\n"
+        "Example:\n"
+        "```json\n"
+        "{\n"
+        "  \"base_d\": \"laufen\",\n"
+        "  \"base_e\": \"to run\",\n"
+        "  \"artikel_d\": \"\",\n"
+        "  \"plural_d\": \"\",\n"
+        "  \"praesens\": \"läuft\",\n"
+        "  \"praeteritum\": \"lief\",\n"
+        "  \"perfekt\": \"ist gelaufen\",\n"
+        "  \"full_d\": \"läuft, lief, ist gelaufen\",\n"
+        "  \"s1\": \"Ich laufe jeden Morgen im Park. (I run every morning in the park.)\"\n"
+        "}\n"
+        "```"
+    )
 
     headers = {'Content-Type': 'application/json'}
     body = {
@@ -82,6 +89,14 @@ Reply in JSON format like this (inside a ```json code block):
                 forms.get("Präteritum", ""),
                 forms.get("Perfekt", "")
             ])
+        elif parsed.get("artikel_d") and parsed.get("base_d"):
+            base_d_clean = parsed["base_d"].strip()
+            artikel_d = parsed["artikel_d"].strip()
+            # Avoid duplicate article if base_d already contains it
+            if base_d_clean.lower().startswith(artikel_d.lower() + " "):
+                parsed["full_d"] = base_d_clean
+            else:
+                parsed["full_d"] = f"{artikel_d} {base_d_clean}"
 
         return parsed
 
@@ -90,7 +105,7 @@ Reply in JSON format like this (inside a ```json code block):
 
 # === ANKI ADD ===
 def add_to_anki(parsed_word, deck_name):
-    required_fields = ["base_d", "base_e", "s1", "s1e"]
+    required_fields = ["base_d", "base_e", "s1"]
     if (
         not parsed_word or
         "error" in parsed_word or
@@ -99,6 +114,19 @@ def add_to_anki(parsed_word, deck_name):
         print(f"[DEBUG] Incomplete Gemini response for word. Full content:\n{json.dumps(parsed_word, indent=2, ensure_ascii=False)}")
         return False, "Cannot create note: required fields missing or Gemini failed."
 
+    # === Fallback for full_d ===
+    if not parsed_word.get("full_d"):
+        praesens = parsed_word.get("praesens", "").strip()
+        praeteritum = parsed_word.get("praeteritum", "").strip()
+        perfekt = parsed_word.get("perfekt", "").strip()
+
+        if praesens or praeteritum or perfekt:
+            parsed_word["full_d"] = ", ".join(filter(None, [praesens, praeteritum, perfekt]))
+        elif parsed_word.get("artikel_d") and parsed_word.get("base_d"):
+            parsed_word["full_d"] = f"{parsed_word['artikel_d'].strip()} {parsed_word['base_d'].strip()}"
+        else:
+            parsed_word["full_d"] = parsed_word.get("base_d", "")
+
     fields = {
         "base_d": str(parsed_word.get("base_d", "") or ""),
         "base_e": str(parsed_word.get("base_e", "") or ""),
@@ -106,8 +134,7 @@ def add_to_anki(parsed_word, deck_name):
         "plural_d": str(parsed_word.get("plural_d", "") or ""),
         "full_d": parsed_word.get("full_d") if parsed_word.get("full_d") is not None else "",
         "audio_text_d": parsed_word.get("full_d") if parsed_word.get("full_d") is not None else "",
-        "s1": str(parsed_word.get("s1", "") or ""),
-        "s1e": str(parsed_word.get("s1e", "") or "")
+        "s1": str(parsed_word.get("s1", "") or "")
     }
 
     payload = {
@@ -118,7 +145,7 @@ def add_to_anki(parsed_word, deck_name):
                 "deckName": deck_name,
                 "modelName": NOTE_TYPE,
                 "fields": fields,
-                "options": {"allowDuplicate": False},
+                "options": {"allowDuplicate": True},
                 "tags": ["auto-added"]
             }
         }
@@ -143,8 +170,8 @@ def get_anki_decks():
     except Exception:
         return []
 # === Check for duplicates ===
-def is_duplicate(base_d_value):
-    query = f'note:"{NOTE_TYPE.strip()}" base_d:"{base_d_value}"'
+def is_duplicate(base_d_value, base_a_value):
+    query = f'note:"{NOTE_TYPE.strip()}" base_d:"{base_d_value}" base_a:"{base_a_value}"'
     payload = {
         "action": "findNotes",
         "version": 6,
@@ -227,10 +254,6 @@ def run_gui():
         for word in words:
             output_box.append(f"Processing: {word}...")
             QApplication.processEvents()
-            if is_duplicate(word):
-                output_box.append(f"Skipped duplicate: {word}\n")
-                progress_bar.setValue(progress_bar.value() + 1)
-                continue
 
             for attempt in range(4):
                 gemini_data = query_gemini(word)
@@ -240,6 +263,11 @@ def run_gui():
 
             if "error" in gemini_data:
                 output_box.append(f"Gemini failed for: {word}\n")
+                progress_bar.setValue(progress_bar.value() + 1)
+                continue
+
+            if is_duplicate(gemini_data.get("base_d", ""), gemini_data.get("base_a", "")):
+                output_box.append(f"Skipped duplicate: {gemini_data.get('base_d', '')}\n")
                 progress_bar.setValue(progress_bar.value() + 1)
                 continue
 
