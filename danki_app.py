@@ -14,14 +14,18 @@ from PyQt5.QtWidgets import (
     QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit, QCheckBox
 )
 import sys
+from pathlib import Path
+
+CONFIG_PATH = Path(os.path.expanduser("~/.danki/gemini_config.json"))
 
 def save_api_key(api_key, allow_duplicates=True):
-    with open("gemini_config.json", "w") as f:
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(CONFIG_PATH, "w") as f:
         json.dump({"api_key": api_key, "allow_duplicates": allow_duplicates}, f)
 
 def load_api_key():
-    if os.path.exists("gemini_config.json"):
-        with open("gemini_config.json") as f:
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH) as f:
             config = json.load(f)
             return config.get("api_key"), config.get("allow_duplicates", True)
     return None, True
