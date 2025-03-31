@@ -20,20 +20,13 @@ Danki is a lightweight macOS app that helps you automate German vocabulary acqui
 
 ## Installation
 
-### 1. Download the App
+### Download the App
 
 Download the latest release ZIP from the [Releases page](https://github.com/udaysidhu99/danki/releases/latest).
 
 Unzip it — it includes:
 - `Danki.app` (macOS app)
 - `Danki_Deck_Template.apkg` (Anki deck template)
-
-### 2. Install Dependencies
-Make sure you have Python 3, `PyQt5`, and `requests` installed:
-```bash
-pip install PyQt5 requests
-```
-
 ---
 
 ## Gemini API Key
