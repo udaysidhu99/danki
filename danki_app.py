@@ -253,7 +253,7 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
 
 def generate_tts_audio(text, filename_hint):
     try:
-        filename = f"sapi5js-{filename_hint}.mp3"
+        filename = os.path.join(tempfile.gettempdir(), f"sapi5js-{filename_hint}.mp3")
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         communicate = Communicate(text, "de-DE-KatjaNeural")
@@ -351,7 +351,7 @@ def run_gui():
 
     # Input box
     input_label = QLabel("Enter German words (comma or newline separated):")
-    disclaimer = QLabel("Submitting too many words at once may exceed the request limit of Gemini’s free tier.")
+    disclaimer = QLabel("Gemini free tier may reject large requests. Add fewer words if it fails.")
     disclaimer.setStyleSheet("color: grey; font-size: 10px;")
     main_layout.addWidget(input_label)
     main_layout.addWidget(disclaimer)
@@ -369,10 +369,6 @@ def run_gui():
     def clear_text_boxes():
         input_box.clear()
         output_box.clear()
-
-    clear_btn = QPushButton("Clear")
-    clear_btn.clicked.connect(clear_text_boxes)
-    main_layout.addWidget(clear_btn)
 
     # Progress bar
     progress_bar = QProgressBar()
@@ -425,11 +421,26 @@ def run_gui():
             output_box.append(f"{status} {msg}\n")
             progress_bar.setValue(progress_bar.value() + 1)
 
-            output_box.append("Done!")
+        output_box.append("Done!")
 
+    button_layout = QHBoxLayout()
+    
+    clear_btn = QPushButton("Clear")
+    clear_btn.clicked.connect(clear_text_boxes)
+    button_layout.addWidget(clear_btn)
+    
+    def update_clear_button_state():
+        clear_btn.setEnabled(bool(input_box.toPlainText().strip() or output_box.toPlainText().strip()))
+    
+    input_box.textChanged.connect(update_clear_button_state)
+    output_box.textChanged.connect(update_clear_button_state)
+    update_clear_button_state()
+    
     add_btn = QPushButton("Add Words to Deck")
     add_btn.clicked.connect(process_words)
-    main_layout.addWidget(add_btn)
+    button_layout.addWidget(add_btn)
+    
+    main_layout.addLayout(button_layout)
 
     main_tab.setLayout(main_layout)
 
@@ -476,7 +487,7 @@ def run_gui():
 
     preferences_tab.setLayout(preferences_main_layout)
 
-    tabs.addTab(main_tab, "Main")
+    tabs.addTab(main_tab, " Main")
     tabs.addTab(preferences_tab, "Preferences")
 
     layout.addWidget(tabs)
