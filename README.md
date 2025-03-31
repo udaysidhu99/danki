@@ -20,11 +20,13 @@ Danki is a lightweight macOS app that helps you automate German vocabulary acqui
 
 ## Installation
 
-### 1. Clone the Repo
-```bash
-git clone https://github.com/udaysidhu99/danki
-cd danki
-```
+### 1. Download the App
+
+Download the latest release ZIP from the [Releases page](https://github.com/udaysidhu99/danki/releases/latest).
+
+Unzip it — it includes:
+- `Danki.app` (macOS app)
+- `Danki_Deck_Template.apkg` (Anki deck template)
 
 ### 2. Install Dependencies
 Make sure you have Python 3, `PyQt5`, and `requests` installed:
@@ -56,7 +58,7 @@ This is required for the app to send notes to Anki.
 ### 3. Import the Template Deck
 Before using the app, **import the provided `.apkg` file** to set up the correct note type.
 
-Import `template/Danki_Deck_Template.apkg` into Anki:
+Import `Danki_Deck_Template.apkg` from the ZIP into Anki:
 - Open Anki
 - Go to **File > Import**
 - Select the `.apkg` file
@@ -67,6 +69,8 @@ This step ensures the custom note type **"German Auto"** with required fields ex
 ---
 
 ## Usage
+
+Note: If using the macOS app version, double-click `Danki.app` to launch.
 
 Launch the app:
 ```bash
@@ -96,7 +100,11 @@ Each note contains:
 
 ---
 
+## Why I Built This
 
+While learning German, I often came across new words in daily life — on signs, in conversations, or while watching something. I would quickly look them up and understand the meaning, but over time, I’d forget them. I realised how helpful it would be to immediately add these words to my Anki deck for spaced repetition. So, I started jotting down just the German words on my phone. With this little utility, I can now easily paste those collected words into the GUI, and the app fetches all the necessary info and adds them to a dedicated Anki deck — ready for review and practice.
+
+---
 
 ## Error Handling
 
