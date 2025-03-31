@@ -15,6 +15,19 @@ Danki is a lightweight macOS app that helps you automate German vocabulary acqui
 - Skips duplicates already present in Anki
 - Smart error handling: invalid characters, missing internet, Gemini rate limits
 - Includes pre-made Anki `.apkg` deck with the correct note type and fields
+## macOS Permissions
+
+macOS may block the app from opening because it is not notarized. This is expected.
+
+### To allow it to run:
+
+1. Try launching the app once by double-clicking. macOS will block it.
+2. Open **System Settings → Privacy & Security**
+3. Scroll down to the “Security” section
+4. Click **“Allow Anyway”** next to the message about `Danki.app`
+5. Launch the app again. This time, you can click **Open** when prompted.
+
+You only need to do this once.
 
 ---
 
