@@ -93,12 +93,6 @@ Each note contains:
 
 ---
 
-## Why I Built This
-
-While learning German, I often came across new words in daily life — on signs, in conversations, or while watching something. I would quickly look them up and understand the meaning, but over time, I’d forget them. I realised how helpful it would be to immediately add these words to my Anki deck for spaced repetition. So, I started jotting down just the German words on my phone. With this little utility, I can now easily paste those collected words into the GUI, and the app fetches all the necessary info and adds them to a dedicated Anki deck — ready for review and practice.
-
----
-
 ## Error Handling
 
 - Detects and skips entries with invalid characters or nonsense input
