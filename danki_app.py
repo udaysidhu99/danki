@@ -11,8 +11,10 @@ from edge_tts import Communicate
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QTextEdit, QVBoxLayout,
-    QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit, QCheckBox
+    QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit, QCheckBox, QToolButton
 )
+from PyQt5.QtCore import QSize
+from PyQt5.QtGui import QIcon
 import sys
 from pathlib import Path
 
@@ -38,7 +40,7 @@ def is_connected():
         return False
 
 # === CONFIG ===
-NOTE_TYPE = "German Auto"  # ← trailing space
+NOTE_TYPE = "German Auto"  
 ANKI_ENDPOINT = "http://localhost:8765"
 
 # === GEMINI QUERY ===
@@ -279,6 +281,53 @@ def get_anki_decks():
     except Exception:
         QMessageBox.warning(None, "Anki not responding", "Anki is not running or AnkiConnect is not enabled.")
         return []
+
+def find_note_count(query):
+    payload = {
+        "action": "findNotes",
+        "version": 6,
+        "params": {"query": query}
+    }
+    try:
+        response = requests.post(ANKI_ENDPOINT, json=payload)
+        notes = response.json().get("result", [])
+        return len(notes)
+    except Exception:
+        return 0
+
+def get_wordmaster_decks():
+    decks = get_anki_decks()
+    wordmaster_decks = []
+    for deck in decks:
+        # Check if deck is empty
+        note_count = find_note_count(f'deck:"{deck}"')
+        if note_count == 0:
+            wordmaster_decks.append(deck)
+        else:
+            german_note_count = find_note_count(f'deck:"{deck}" note:"{NOTE_TYPE}"')
+            if german_note_count > 0:
+                wordmaster_decks.append(deck)
+    return wordmaster_decks
+
+def get_phrasemaster_decks():
+    payload = {"action": "deckNames", "version": 6}
+    try:
+        response = requests.post(ANKI_ENDPOINT, json=payload, timeout=5)
+        decks = response.json().get("result", [])
+    except Exception:
+        QMessageBox.warning(None, "Anki not responding", "Anki is not running or AnkiConnect is not enabled.")
+        return []
+
+    valid_decks = []
+    for deck in decks:
+        note_count = find_note_count(f'deck:"{deck}"')
+        if note_count == 0:
+            valid_decks.append(deck)
+        else:
+            phrase_note_count = find_note_count(f'deck:"{deck}" note:"Phrase Auto"')
+            if phrase_note_count > 0:
+                valid_decks.append(deck)
+    return valid_decks
 # === Check for duplicates ===
 def is_duplicate(base_d_value, base_a_value):
     query = f'note:"{NOTE_TYPE.strip()}" base_d:"{base_d_value}" base_a:"{base_a_value}"'
@@ -317,8 +366,8 @@ def run_gui():
 
     tabs = QtWidgets.QTabWidget()
 
-    # Main tab
-    main_tab = QWidget()
+    # WordMaster tab
+    wordmaster_tab = QWidget()
     main_layout = QVBoxLayout()
 
     global API_KEY
@@ -334,7 +383,7 @@ def run_gui():
     deck_layout = QHBoxLayout()
     deck_label = QLabel("Select Anki Deck:")
     deck_combo = QComboBox()
-    deck_list = get_anki_decks()
+    deck_list = get_wordmaster_decks()
     deck_combo.addItems(deck_list)
     deck_layout.addWidget(deck_label)
     deck_layout.addWidget(deck_combo)
@@ -342,7 +391,7 @@ def run_gui():
     refresh_btn = QPushButton("Refresh")
     def refresh_decks():
         deck_combo.clear()
-        updated = get_anki_decks()
+        updated = get_wordmaster_decks()
         deck_combo.addItems(updated)
     refresh_btn.clicked.connect(refresh_decks)
     deck_layout.addWidget(refresh_btn)
@@ -356,13 +405,13 @@ def run_gui():
     main_layout.addWidget(input_label)
     main_layout.addWidget(disclaimer)
     input_box = QTextEdit()
-    input_box.setFixedHeight(200)
+    input_box.setFixedHeight(300)
     main_layout.addWidget(input_box)
 
     # Output log
     output_box = QTextEdit()
     output_box.setReadOnly(True)
-    output_box.setFixedHeight(100)
+    output_box.setFixedHeight(150)
     main_layout.addWidget(output_box)
 
     # Clear button
@@ -418,7 +467,8 @@ def run_gui():
 
             success, msg = add_to_anki(gemini_data, selected_deck, allow_duplicates)
             status = "Success" if success else "Failed"
-            output_box.append(f"{status} {msg}\n")
+            meaning_display = f" → {gemini_data.get('base_e', '')}" if success else ""
+            output_box.append(f"{status} {msg}{meaning_display}\n")
             progress_bar.setValue(progress_bar.value() + 1)
 
         output_box.append("Done!")
@@ -442,7 +492,7 @@ def run_gui():
     
     main_layout.addLayout(button_layout)
 
-    main_tab.setLayout(main_layout)
+    wordmaster_tab.setLayout(main_layout)
 
     # Preferences tab (currently empty)
     preferences_tab = QWidget()
@@ -487,7 +537,105 @@ def run_gui():
 
     preferences_tab.setLayout(preferences_main_layout)
 
-    tabs.addTab(main_tab, " Main")
+    tabs.addTab(wordmaster_tab, "WordMaster")
+    # PhraseMaster tab
+    phrasemaster_tab = QWidget()
+    phrasemaster_layout = QVBoxLayout()
+    
+    # Deck Dropdown
+    phrase_deck_layout = QHBoxLayout()
+    phrase_deck_label = QLabel("Select Anki Deck:")
+    phrase_deck_combo = QComboBox()
+    phrase_deck_list = get_phrasemaster_decks()
+    phrase_deck_combo.addItems(phrase_deck_list)
+    phrase_deck_layout.addWidget(phrase_deck_label)
+    phrase_deck_layout.addWidget(phrase_deck_combo)
+    
+    phrase_refresh_btn = QPushButton("Refresh")
+    def refresh_phrase_decks():
+        phrase_deck_combo.clear()
+        updated = get_phrasemaster_decks()
+        phrase_deck_combo.addItems(updated)
+    phrase_refresh_btn.clicked.connect(refresh_phrase_decks)
+    phrase_deck_layout.addWidget(phrase_refresh_btn)
+    
+    phrasemaster_layout.addLayout(phrase_deck_layout)
+    
+    # Input box
+    phrase_input_label = QLabel("Enter sentences (English or German), one per line:")
+    phrasemaster_layout.addWidget(phrase_input_label)
+    phrase_disclaimer = QLabel("Gemini free tier may reject requests with large number of sentences.")
+    phrase_disclaimer.setStyleSheet("color: grey; font-size: 10px;")
+    phrasemaster_layout.addWidget(phrase_disclaimer)
+    phrase_input_box = QTextEdit()
+    phrase_input_box.setFixedHeight(250)
+    phrasemaster_layout.addWidget(phrase_input_box)
+    
+    # Context input box (optional) with help
+    context_row = QHBoxLayout()
+    
+    context_label = QLabel("Context (optional):")
+    context_label.setStyleSheet("font-size: 11px; color: grey;")
+    context_row.addWidget(context_label)
+    
+    context_help_btn = QToolButton()
+    icon_path = os.path.join(os.path.dirname(__file__), "info.circle.svg")
+    context_help_btn.setIcon(QIcon(icon_path))
+    context_help_btn.setToolTip("What is 'Context'?")
+    context_help_btn.setStyleSheet("""
+        QToolButton {
+            border: none;
+            background: transparent;
+            padding: 0px;
+        }
+    """)
+    context_help_btn.setIconSize(QSize(16, 16))
+    def show_context_help():
+        QMessageBox.information(None, "What is 'Context'?",
+            "You can optionally add context to your sentence (e.g., informal chat, business email, on a date, asking directions from a stranger).\n"
+            "This helps the model provide more accurate translations.")
+    context_help_btn.clicked.connect(show_context_help)
+    context_row.addWidget(context_help_btn)
+    context_row.addStretch()
+    
+    phrasemaster_layout.addLayout(context_row)
+    
+    context_input_box = QTextEdit()
+    context_input_box.setFixedHeight(50)
+    phrasemaster_layout.addWidget(context_input_box)
+    
+    # Output log
+    phrase_output_box = QTextEdit()
+    phrase_output_box.setReadOnly(True)
+    phrase_output_box.setFixedHeight(100)
+    phrasemaster_layout.addWidget(phrase_output_box)
+    
+    # Progress bar
+    phrase_progress_bar = QProgressBar()
+    phrase_progress_bar.setValue(0)
+    phrasemaster_layout.addWidget(phrase_progress_bar)
+    
+    # Clear button
+    def clear_phrase_boxes():
+        phrase_input_box.clear()
+        phrase_output_box.clear()
+    
+    # Process button (placeholder for now)
+    def process_phrase():
+        phrase_output_box.append("Processing phrase... (functionality coming soon)")
+    
+    phrase_button_layout = QHBoxLayout()
+    phrase_clear_btn = QPushButton("Clear")
+    phrase_clear_btn.clicked.connect(clear_phrase_boxes)
+    phrase_button_layout.addWidget(phrase_clear_btn)
+    
+    phrase_add_btn = QPushButton("Add Phrase to Deck")
+    phrase_add_btn.clicked.connect(process_phrase)
+    phrase_button_layout.addWidget(phrase_add_btn)
+    
+    phrasemaster_layout.addLayout(phrase_button_layout)
+    phrasemaster_tab.setLayout(phrasemaster_layout)
+    tabs.addTab(phrasemaster_tab, "PhraseMaster")
     tabs.addTab(preferences_tab, "Preferences")
 
     layout.addWidget(tabs)
