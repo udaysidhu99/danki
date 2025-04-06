@@ -527,6 +527,9 @@ def run_gui():
     api_input_layout.addWidget(save_btn)
     preferences_main_layout.addLayout(api_input_layout)
     preferences_main_layout.addWidget(allow_dupes_checkbox)
+    include_notes_checkbox = QCheckBox("Include grammar/usage notes in PhraseMaster")
+    include_notes_checkbox.setChecked(True)
+    preferences_main_layout.addWidget(include_notes_checkbox)
 
     disclaimer = QLabel("Note: Duplicate detection is handled by Anki.\nIt checks across all decks using the same note type.")
     disclaimer.setWordWrap(True)
@@ -622,7 +625,130 @@ def run_gui():
     
     # Process button (placeholder for now)
     def process_phrase():
-        phrase_output_box.append("Processing phrase... (functionality coming soon)")
+        if not is_connected():
+            QMessageBox.critical(None, "No Internet", "An internet connection is required to use Gemini.")
+            return
+
+        sentences_raw = phrase_input_box.toPlainText()
+        context_text = context_input_box.toPlainText().strip()
+        selected_deck = phrase_deck_combo.currentText()
+        sentences = [s.strip() for s in sentences_raw.split("\n") if s.strip()]
+        phrase_output_box.clear()
+        phrase_progress_bar.setMaximum(len(sentences))
+        phrase_progress_bar.setValue(0)
+
+        for sentence in sentences:
+            prompt = (
+                "INSTRUCTIONS: Return ONLY a JSON code block with the following fields.\n"
+                "- german: corrected or original German sentence\n"
+                "- english: English translation of the sentence\n"
+                "- note: (optional) a short grammar or usage note\n"
+                "- error: (optional) only include if input is invalid\n\n"
+                f"Context: {context_text if context_text else 'General'}\n"
+                f"Sentence: {sentence}\n\n"
+                "Respond ONLY with a JSON code block like:\n"
+                "```json\n"
+                "{\n"
+                "  \"german\": \"Ich gehe jeden Tag zur Arbeit.\",\n"
+                "  \"english\": \"I go to work every day.\",\n"
+                "  \"note\": \"'zur' is a contraction of 'zu der'.\"\n"
+                "}\n"
+                "```"
+            )
+
+            GEMINI_ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
+            headers = {'Content-Type': 'application/json'}
+            body = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+
+            try:
+                response = requests.post(GEMINI_ENDPOINT, headers=headers, json=body)
+                result = response.json()
+                if "candidates" not in result:
+                    phrase_output_box.append(f"Gemini error: {result.get('error', 'No candidates returned')}\n")
+                    phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
+                    continue
+
+                content = result["candidates"][0]["content"]["parts"][0]["text"]
+                print(f"[DEBUG] Gemini raw content:\n{content}")
+                match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
+                if not match:
+                    phrase_output_box.append("❌ JSON block not found in Gemini response.\n")
+                    phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
+                    continue
+
+                try:
+                    parsed = json.loads(match.group(1))
+                    print(f"[DEBUG] Parsed JSON keys: {list(parsed.keys())}")
+                except json.JSONDecodeError as e:
+                    phrase_output_box.append(f"❌ JSON decoding error: {str(e)}\n")
+                    phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
+                    continue
+
+                if "error" in parsed:
+                    phrase_output_box.append(f"⚠️ Gemini error: {parsed['error']}\n")
+                    phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
+                    continue
+
+                required_keys = ["german", "english"]
+                if not all(parsed.get(k, "").strip() for k in required_keys):
+                    phrase_output_box.append(f"❌ Incomplete Gemini response. Missing 'german' or 'english'. Parsed keys: {list(parsed.keys())}\n")
+                    phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
+                    continue
+
+                phrase_output_box.append(f"ENG: {parsed['english']}\nDEU: {parsed['german']}\n")
+                german_text = parsed.get("german", "").strip()
+                english_text = parsed.get("english", "").strip()
+                fields = {
+                    "Phrase(German)": german_text,
+                    "Translation": english_text,
+                    "audio_text_d": german_text
+                }
+                if include_notes_checkbox.isChecked():
+                    fields["note"] = parsed.get("note", "")
+                
+                audio_fields = []
+                base_audio = generate_tts_audio(fields["Phrase(German)"], os.urandom(8).hex())
+                if base_audio:
+                    audio_fields.append({
+                        "url": None,
+                        "filename": base_audio["filename"],
+                        "data": base_audio["data"],
+                        "fields": ["audio_d"]
+                    })
+                
+                payload = {
+                    "action": "addNote",
+                    "version": 6,
+                    "params": {
+                        "note": {
+                            "deckName": selected_deck,
+                            "modelName": "Phrase Auto",
+                            "fields": fields,
+                            "options": {"allowDuplicate": allow_duplicates},
+                            "tags": ["auto-added"],
+                            "audio": audio_fields
+                        }
+                    }
+                }
+                
+                try:
+                    res = requests.post(ANKI_ENDPOINT, json=payload)
+                    res_json = res.json()
+                    if res_json.get("error") is None:
+                        phrase_output_box.append("✅ Successfully added to Anki!\n")
+                    else:
+                        phrase_output_box.append(f"❌ Anki error: {res_json['error']}\n")
+                except Exception as e:
+                    phrase_output_box.append(f"❌ Failed to send to Anki: {str(e)}\n")
+
+            except Exception as e:
+                phrase_output_box.append(f"❌ Exception: {str(e)}\n")
+
+            phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
+
+        phrase_output_box.append("Done.")
     
     phrase_button_layout = QHBoxLayout()
     phrase_clear_btn = QPushButton("Clear")
