@@ -1,8 +1,4 @@
-import tkinter as tk
-from PyQt5.QtSvg import QSvgRenderer
-from PyQt5.QtGui import QPixmap, QPainter
 from PyQt5.QtCore import Qt
-from tkinter import ttk, messagebox, scrolledtext, simpledialog
 import requests
 import json
 import re
@@ -17,7 +13,6 @@ from PyQt5.QtWidgets import (
     QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit, QCheckBox, QToolButton
 )
 from PyQt5.QtCore import QSize
-from PyQt5.QtGui import QIcon
 import sys
 from pathlib import Path
 
@@ -359,7 +354,11 @@ def is_duplicate(base_d_value, base_a_value):
 
 # === GUI ===
 def run_gui():
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
     QtWidgets.QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
+    QtWidgets.QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     app = QApplication(sys.argv)
     window = QWidget()
 
@@ -397,6 +396,10 @@ def run_gui():
     deck_combo = QComboBox()
     deck_list = get_wordmaster_decks()
     deck_combo.addItems(deck_list)
+    if deck_list and deck_list[0].lower() == "default" and len(deck_list) > 1:
+        deck_combo.setCurrentIndex(1)
+    else:
+        deck_combo.setCurrentIndex(0)
     deck_layout.addWidget(deck_label)
     deck_layout.addWidget(deck_combo)
 
@@ -405,6 +408,10 @@ def run_gui():
         deck_combo.clear()
         updated = get_wordmaster_decks()
         deck_combo.addItems(updated)
+        if updated and updated[0].lower() == "default" and len(updated) > 1:
+            deck_combo.setCurrentIndex(1)
+        else:
+            deck_combo.setCurrentIndex(0)
     refresh_btn.clicked.connect(refresh_decks)
     deck_layout.addWidget(refresh_btn)
 
@@ -563,6 +570,10 @@ def run_gui():
     phrase_deck_combo = QComboBox()
     phrase_deck_list = get_phrasemaster_decks()
     phrase_deck_combo.addItems(phrase_deck_list)
+    if phrase_deck_list and phrase_deck_list[0].lower() == "default" and len(phrase_deck_list) > 1:
+        phrase_deck_combo.setCurrentIndex(1)
+    else:
+        phrase_deck_combo.setCurrentIndex(0)
     phrase_deck_layout.addWidget(phrase_deck_label)
     phrase_deck_layout.addWidget(phrase_deck_combo)
     
@@ -571,6 +582,10 @@ def run_gui():
         phrase_deck_combo.clear()
         updated = get_phrasemaster_decks()
         phrase_deck_combo.addItems(updated)
+        if updated and updated[0].lower() == "default" and len(updated) > 1:
+            phrase_deck_combo.setCurrentIndex(1)
+        else:
+            phrase_deck_combo.setCurrentIndex(0)
     phrase_refresh_btn.clicked.connect(refresh_phrase_decks)
     phrase_deck_layout.addWidget(phrase_refresh_btn)
     
