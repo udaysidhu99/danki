@@ -1,4 +1,7 @@
 import tkinter as tk
+from PyQt5.QtSvg import QSvgRenderer
+from PyQt5.QtGui import QPixmap, QPainter
+from PyQt5.QtCore import Qt
 from tkinter import ttk, messagebox, scrolledtext, simpledialog
 import requests
 import json
@@ -20,17 +23,25 @@ from pathlib import Path
 
 CONFIG_PATH = Path(os.path.expanduser("~/.danki/gemini_config.json"))
 
-def save_api_key(api_key, allow_duplicates=True):
+def save_api_key(api_key, allow_duplicates=True, include_notes=True):
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w") as f:
-        json.dump({"api_key": api_key, "allow_duplicates": allow_duplicates}, f)
+        json.dump({
+            "api_key": api_key,
+            "allow_duplicates": allow_duplicates,
+            "include_notes": include_notes
+        }, f)
 
 def load_api_key():
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
             config = json.load(f)
-            return config.get("api_key"), config.get("allow_duplicates", True)
-    return None, True
+            return (
+                config.get("api_key"),
+                config.get("allow_duplicates", True),
+                config.get("include_notes", True)
+            )
+    return None, True, True
 
 def is_connected():
     try:
@@ -348,6 +359,7 @@ def is_duplicate(base_d_value, base_a_value):
 
 # === GUI ===
 def run_gui():
+    QtWidgets.QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication(sys.argv)
     window = QWidget()
 
@@ -371,7 +383,7 @@ def run_gui():
     main_layout = QVBoxLayout()
 
     global API_KEY
-    API_KEY, allow_duplicates = load_api_key()
+    API_KEY, allow_duplicates, include_notes = load_api_key()
     if not API_KEY:
         API_KEY, ok = QInputDialog.getText(window, "Gemini API Key", "Enter your Gemini API Key:")
         if not ok or not API_KEY:
@@ -507,7 +519,7 @@ def run_gui():
 
     allow_dupes_checkbox = QCheckBox("Allow Duplicate Notes")
     allow_dupes_checkbox.setChecked(allow_duplicates)
-    allow_dupes_checkbox.stateChanged.connect(lambda _: save_api_key(API_KEY, allow_dupes_checkbox.isChecked()))
+    allow_dupes_checkbox.stateChanged.connect(lambda _: save_api_key(API_KEY, allow_dupes_checkbox.isChecked(), include_notes_checkbox.isChecked()))
 
     def save_preferences():
         new_key = api_input.text().strip()
@@ -527,14 +539,14 @@ def run_gui():
     api_input_layout.addWidget(save_btn)
     preferences_main_layout.addLayout(api_input_layout)
     preferences_main_layout.addWidget(allow_dupes_checkbox)
-    include_notes_checkbox = QCheckBox("Include grammar/usage notes in PhraseMaster")
-    include_notes_checkbox.setChecked(True)
-    preferences_main_layout.addWidget(include_notes_checkbox)
-
     disclaimer = QLabel("Note: Duplicate detection is handled by Anki.\nIt checks across all decks using the same note type.")
     disclaimer.setWordWrap(True)
     disclaimer.setStyleSheet("color: gray; font-size: 10px;")
     preferences_main_layout.addWidget(disclaimer)
+    include_notes_checkbox = QCheckBox("Include grammar/usage notes in PhraseMaster")
+    include_notes_checkbox.setChecked(include_notes)
+    preferences_main_layout.addWidget(include_notes_checkbox)
+    include_notes_checkbox.stateChanged.connect(lambda _: save_api_key(API_KEY, allow_dupes_checkbox.isChecked(), include_notes_checkbox.isChecked()))
 
     preferences_main_layout.addStretch()
 
@@ -567,6 +579,9 @@ def run_gui():
     # Input box
     phrase_input_label = QLabel("Enter sentences (English or German), one per line:")
     phrasemaster_layout.addWidget(phrase_input_label)
+    phrase_format_disclaimer = QLabel("Separate multiple sentences with newlines. Commas are allowed within sentences.")
+    phrase_format_disclaimer.setStyleSheet("color: grey; font-size: 10px;")
+    phrasemaster_layout.addWidget(phrase_format_disclaimer)
     phrase_disclaimer = QLabel("Gemini free tier may reject requests with large number of sentences.")
     phrase_disclaimer.setStyleSheet("color: grey; font-size: 10px;")
     phrasemaster_layout.addWidget(phrase_disclaimer)
@@ -582,8 +597,9 @@ def run_gui():
     context_row.addWidget(context_label)
     
     context_help_btn = QToolButton()
-    icon_path = os.path.join(os.path.dirname(__file__), "info.circle.svg")
-    context_help_btn.setIcon(QIcon(icon_path))
+    style = QApplication.style()
+    context_help_btn.setIcon(style.standardIcon(QtWidgets.QStyle.SP_MessageBoxInformation))
+    context_help_btn.setIconSize(QSize(24, 24))
     context_help_btn.setToolTip("What is 'Context'?")
     context_help_btn.setStyleSheet("""
         QToolButton {
@@ -592,7 +608,7 @@ def run_gui():
             padding: 0px;
         }
     """)
-    context_help_btn.setIconSize(QSize(16, 16))
+    context_help_btn.setIconSize(QSize(24, 24))
     def show_context_help():
         QMessageBox.information(None, "What is 'Context'?",
             "You can optionally add context to your sentence (e.g., informal chat, business email, on a date, asking directions from a stranger).\n"
@@ -606,6 +622,15 @@ def run_gui():
     context_input_box = QTextEdit()
     context_input_box.setFixedHeight(50)
     phrasemaster_layout.addWidget(context_input_box)
+
+    def update_context_box_state():
+        text = phrase_input_box.toPlainText()
+        has_multiple_sentences = "\n" in text.strip()
+        context_input_box.setDisabled(has_multiple_sentences)
+        context_label.setText("Context (optional):" if not has_multiple_sentences else "Context (disabled for multiple sentences)")
+
+    phrase_input_box.textChanged.connect(update_context_box_state)
+    update_context_box_state()
     
     # Output log
     phrase_output_box = QTextEdit()
