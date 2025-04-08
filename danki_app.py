@@ -8,6 +8,7 @@ import base64
 import asyncio
 from edge_tts import Communicate
 from PyQt5 import QtWidgets
+from PyQt5 import QtGui
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QTextEdit, QVBoxLayout,
     QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit, QCheckBox, QToolButton
@@ -305,6 +306,9 @@ def get_wordmaster_decks():
     decks = get_anki_decks()
     wordmaster_decks = []
     for deck in decks:
+        # Exclude default deck
+        if deck.strip().lower() == "default":
+            continue
         # Check if deck is empty
         note_count = find_note_count(f'deck:"{deck}"')
         if note_count == 0:
@@ -326,6 +330,9 @@ def get_phrasemaster_decks():
 
     valid_decks = []
     for deck in decks:
+        # Exclude default deck
+        if deck.strip().lower() == "default":
+            continue
         note_count = find_note_count(f'deck:"{deck}"')
         if note_count == 0:
             valid_decks.append(deck)
@@ -361,6 +368,7 @@ def run_gui():
     QtWidgets.QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     app = QApplication(sys.argv)
     window = QWidget()
+    window.setWindowIcon(QtGui.QIcon("icon.ico"))
 
     # Menu bar with Preferences
     menu_bar = QtWidgets.QMenuBar()
@@ -396,10 +404,10 @@ def run_gui():
     deck_combo = QComboBox()
     deck_list = get_wordmaster_decks()
     deck_combo.addItems(deck_list)
-    if deck_list and deck_list[0].lower() == "default" and len(deck_list) > 1:
-        deck_combo.setCurrentIndex(1)
-    else:
+    if deck_list:
         deck_combo.setCurrentIndex(0)
+    else:
+        deck_combo.setCurrentIndex(-1)
     deck_layout.addWidget(deck_label)
     deck_layout.addWidget(deck_combo)
 
@@ -408,10 +416,10 @@ def run_gui():
         deck_combo.clear()
         updated = get_wordmaster_decks()
         deck_combo.addItems(updated)
-        if updated and updated[0].lower() == "default" and len(updated) > 1:
-            deck_combo.setCurrentIndex(1)
-        else:
+        if updated:
             deck_combo.setCurrentIndex(0)
+        else:
+            deck_combo.setCurrentIndex(-1)
     refresh_btn.clicked.connect(refresh_decks)
     deck_layout.addWidget(refresh_btn)
 
@@ -425,11 +433,13 @@ def run_gui():
     main_layout.addWidget(disclaimer)
     input_box = QTextEdit()
     input_box.setFixedHeight(300)
+    input_box.setTabChangesFocus(True)
     main_layout.addWidget(input_box)
 
     # Output log
     output_box = QTextEdit()
     output_box.setReadOnly(True)
+    output_box.setTabChangesFocus(True)
     output_box.setFixedHeight(150)
     main_layout.addWidget(output_box)
 
@@ -570,10 +580,10 @@ def run_gui():
     phrase_deck_combo = QComboBox()
     phrase_deck_list = get_phrasemaster_decks()
     phrase_deck_combo.addItems(phrase_deck_list)
-    if phrase_deck_list and phrase_deck_list[0].lower() == "default" and len(phrase_deck_list) > 1:
-        phrase_deck_combo.setCurrentIndex(1)
-    else:
+    if phrase_deck_list:
         phrase_deck_combo.setCurrentIndex(0)
+    else:
+        phrase_deck_combo.setCurrentIndex(-1)
     phrase_deck_layout.addWidget(phrase_deck_label)
     phrase_deck_layout.addWidget(phrase_deck_combo)
     
@@ -582,10 +592,10 @@ def run_gui():
         phrase_deck_combo.clear()
         updated = get_phrasemaster_decks()
         phrase_deck_combo.addItems(updated)
-        if updated and updated[0].lower() == "default" and len(updated) > 1:
-            phrase_deck_combo.setCurrentIndex(1)
-        else:
+        if updated:
             phrase_deck_combo.setCurrentIndex(0)
+        else:
+            phrase_deck_combo.setCurrentIndex(-1)
     phrase_refresh_btn.clicked.connect(refresh_phrase_decks)
     phrase_deck_layout.addWidget(phrase_refresh_btn)
     
@@ -602,6 +612,7 @@ def run_gui():
     phrasemaster_layout.addWidget(phrase_disclaimer)
     phrase_input_box = QTextEdit()
     phrase_input_box.setFixedHeight(250)
+    phrase_input_box.setTabChangesFocus(True)
     phrasemaster_layout.addWidget(phrase_input_box)
     
     # Context input box (optional) with help
@@ -616,6 +627,7 @@ def run_gui():
     context_help_btn.setIcon(style.standardIcon(QtWidgets.QStyle.SP_MessageBoxInformation))
     context_help_btn.setIconSize(QSize(24, 24))
     context_help_btn.setToolTip("What is 'Context'?")
+    context_help_btn.setFocusPolicy(Qt.NoFocus)
     context_help_btn.setStyleSheet("""
         QToolButton {
             border: none;
@@ -636,6 +648,7 @@ def run_gui():
     
     context_input_box = QTextEdit()
     context_input_box.setFixedHeight(50)
+    context_input_box.setTabChangesFocus(True)
     phrasemaster_layout.addWidget(context_input_box)
 
     def update_context_box_state():
@@ -662,6 +675,7 @@ def run_gui():
     def clear_phrase_boxes():
         phrase_input_box.clear()
         phrase_output_box.clear()
+        context_input_box.clear()
     
     # Process button (placeholder for now)
     def process_phrase():
@@ -777,7 +791,7 @@ def run_gui():
                     res = requests.post(ANKI_ENDPOINT, json=payload)
                     res_json = res.json()
                     if res_json.get("error") is None:
-                        phrase_output_box.append("✅ Successfully added to Anki!\n")
+                        phrase_output_box.append("Successfully added to Anki!\n")
                     else:
                         phrase_output_box.append(f"❌ Anki error: {res_json['error']}\n")
                 except Exception as e:
@@ -793,6 +807,12 @@ def run_gui():
     phrase_button_layout = QHBoxLayout()
     phrase_clear_btn = QPushButton("Clear")
     phrase_clear_btn.clicked.connect(clear_phrase_boxes)
+    def update_phrase_clear_button_state():
+        phrase_clear_btn.setEnabled(bool(phrase_input_box.toPlainText().strip() or phrase_output_box.toPlainText().strip()))
+
+    phrase_input_box.textChanged.connect(update_phrase_clear_button_state)
+    phrase_output_box.textChanged.connect(update_phrase_clear_button_state)
+    update_phrase_clear_button_state()
     phrase_button_layout.addWidget(phrase_clear_btn)
     
     phrase_add_btn = QPushButton("Add Phrase to Deck")
