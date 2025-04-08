@@ -17,6 +17,11 @@ from PyQt5.QtCore import QSize
 import sys
 from pathlib import Path
 
+def resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
 CONFIG_PATH = Path(os.path.expanduser("~/.danki/gemini_config.json"))
 
 def save_api_key(api_key, allow_duplicates=True, include_notes=True):
@@ -368,7 +373,7 @@ def run_gui():
     QtWidgets.QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     app = QApplication(sys.argv)
     window = QWidget()
-    window.setWindowIcon(QtGui.QIcon("icon.ico"))
+    window.setWindowIcon(QtGui.QIcon(resource_path("icon.ico")))
 
     # Menu bar with Preferences
     menu_bar = QtWidgets.QMenuBar()
