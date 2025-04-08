@@ -1,20 +1,35 @@
-# Danki – German Vocabulary to Anki 
+# Danki – German Vocabulary to Anki
 
-Danki is a lightweight macOS app that helps you automate German vocabulary acquisition by generating high-quality word data using Google Gemini and sending it straight into your Anki deck — complete with articles, conjugations, and natural example sentences.
+Danki is a lightweight app that helps automate your German learning by generating high-quality vocabulary and sentence data using Google Gemini, then sending it straight into your Anki deck — complete with grammar, context, and native-sounding audio.
+
+Supports both macOS and Windows.
 
 ---
 
 ## Features
 
-- Supports single and multi-word input (comma or newline-separated)
-- Uses Gemini API to fetch structured German word information
-- Automatically includes up to three example sentences (when applicable)
-- Adds notes directly to Anki using AnkiConnect
+- WordMaster: Add single or multi-word vocabulary with translations, grammar, and example sentences
+- PhraseMaster: Add full German or English sentences, with optional grammar notes and context-awareness
+- Context mode: Get better translations by specifying the situation (e.g., formal email, conversation, travel)
 - High-quality offline TTS audio via `edge-tts` (German voices)
-- Includes sentence audio for each example sentence
-- Skips duplicates already present in Anki
-- Smart error handling: invalid characters, missing internet, Gemini rate limits
-- Includes pre-made Anki `.apkg` deck with the correct note type and fields
+- Audio for both vocabulary and full phrases
+- Duplicate detection via AnkiConnect
+- Smart error handling: invalid characters, no internet, Gemini rate limits
+- Comes with pre-built Anki `.apkg` template decks
+
+---
+
+## New in v1.1.0
+
+- **PhraseMaster tab**: Input full sentences (German or English), with Gemini-assisted correction and translation
+- Add context (e.g. "business", "casual", "giving directions") to improve translation accuracy
+- Automatically adds sentence audio to Anki
+- Optional usage/grammar notes
+- Preferences panel: Save your Gemini API key, toggle duplicates, and include/exclude notes
+- First **Windows release**
+
+---
+
 ## macOS Permissions
 
 macOS may block the app from opening because it is not notarized. This is expected.
@@ -23,11 +38,8 @@ macOS may block the app from opening because it is not notarized. This is expect
 
 1. Try launching the app once by double-clicking. macOS will block it.
 2. Open **System Settings → Privacy & Security**
-3. Scroll down to the “Security” section
-4. Click **“Allow Anyway”** next to the message about `Danki.app`
-5. Launch the app again. This time, you can click **Open** when prompted.
-
-You only need to do this once.
+3. Scroll to the Security section and click **“Allow Anyway”**
+4. Open the app again, then click **Open** when prompted
 
 ---
 
@@ -38,8 +50,10 @@ You only need to do this once.
 Download the latest release ZIP from the [Releases page](https://github.com/udaysidhu99/danki/releases/latest).
 
 Unzip it — it includes:
-- `Danki.app` (macOS app)
-- `Danki_Deck_Template.apkg` (Anki deck template)
+- `Danki.app` (macOS) or `Danki.exe` (Windows)
+- `PhraseMasterTemplate.apkg`
+- `WordMasterTemplate.apkg`
+
 ---
 
 ## Gemini API Key
@@ -47,68 +61,64 @@ Unzip it — it includes:
 The app requires a Gemini API key. You can get it here:  
 https://aistudio.google.com/app/apikey
 
-> **Note**: Submitting too many words in a short time may exceed the request limit of Gemini's free tier.
+> **Note**: Submitting too many words or sentences in a short time may exceed Gemini's free-tier rate limits.
 
-The key will be saved locally in a file called `gemini_config.json`.
+The key is saved locally in a file called `gemini_config.json`.
 
 ---
 
 ## Setting Up Anki
 
-### 1. Install [Anki](https://apps.ankiweb.net/)
-Make sure Anki is running before launching Danki.
+1. **Install [Anki](https://apps.ankiweb.net/)**  
+2. **Install [AnkiConnect](https://ankiweb.net/shared/info/2055492159)**  
+3. **Import the Template Decks**  
+   - Open Anki → File → Import
+   - Import both:
+     - `PhraseMasterTemplate.apkg`
+     - `WordMasterTemplate.apkg`
 
-### 2. Install [AnkiConnect](https://ankiweb.net/shared/info/2055492159)
-This is required for the app to send notes to Anki.
-
-### 3. Import the Template Deck
-Before using the app, **import the provided `.apkg` file** to set up the correct note type.
-
-Import `Danki_Deck_Template.apkg` from the ZIP into Anki:
-- Open Anki
-- Go to **File > Import**
-- Select the `.apkg` file
-- Done!
-
-This step ensures the custom note type **"German Auto"** with required fields exists.
+This creates the necessary note types:  
+- `"German Auto"` (WordMaster)  
+- `"Phrase Auto"` (PhraseMaster)
 
 ---
 
 ## Usage
 
-Note: If using the macOS app version, double-click `Danki.app` to launch.
-
-Launch the app:
-```bash
-python danki_app.py
-```
-
-1. Select the Anki deck
-2. Enter German words (comma or newline separated)
-3. Press **"Add Words to Deck"**
-4. Watch the progress bar and log for results
-5. Notes appear in Anki — ready to learn!
+1. Select the desired Anki deck
+2. Enter words (WordMaster) or sentences (PhraseMaster)
+3. Optionally provide context (for PhraseMaster)
+4. Click **"Add"**
+5. Your notes will appear in Anki — with translations, grammar, and audio
 
 ---
 
 ## Note Structure
 
-Each note contains:
-- `base_d`: The original German word
-- `base_e`: English translation(s)
-- `artikel_d`: Definite article (if a noun)
-- `plural_d`: Plural form (for nouns)
-- `full_d`: Article + noun or conjugated forms
-- `audio_text_d`: Same as `full_d` (used for TTS base word audio)
-- `s1`, `s2`, `s3`: Natural German example sentences (1–3 depending on context)
-- `s1e`, `s2e`, `s3e`: English translations of the above sentences
-- `s1a`, `s2a`, `s3a`: TTS audio for each example sentence
+### WordMaster Notes
+- `base_d`: German word
+- `base_e`: English meaning
+- `artikel_d`, `plural_d`: Article & plural (for nouns)
+- `full_d`: Conjugation string or full noun form
+- `audio_text_d`: TTS base word
+- `s1`, `s2`, `s3`: German example sentences
+- `s1e`, `s2e`, `s3e`: English translations
+- `s1a`, `s2a`, `s3a`: Audio for each sentence
+
+### PhraseMaster Notes
+- `Phrase(German)`: Final/corrected German sentence
+- `Translation`: English meaning
+- `note`: (optional) grammar or usage explanation
+- `audio_d`: TTS for full phrase
 
 ---
 
 ## Error Handling
 
-- Detects and skips entries with invalid characters or nonsense input
-- Alerts if no internet connection is available
-- Gracefully handles Gemini timeouts and rate limits
+- Skips invalid entries and nonsense input
+- Alerts if internet is disconnected
+- Handles Gemini timeouts and free-tier limits
 - Warns if Anki or AnkiConnect is not running
+- Disables context box automatically for multiple sentences
+
+---
