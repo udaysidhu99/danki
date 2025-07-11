@@ -181,12 +181,17 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
             parsed_word["full_d"] = parsed_word.get("base_d", "")
 
     audio_fields = []
+    artikel = parsed_word.get("artikel_d", "").strip()
     base_d = parsed_word.get("base_d", "").strip()
+    if artikel:
+        base_for_audio = f"{artikel} {base_d}"
+    else:
+        base_for_audio = base_d
+    base_audio = generate_tts_audio(base_for_audio.replace(" ", ""), os.urandom(8).hex())
     s1 = parsed_word.get("s1", "").strip()
     s2 = parsed_word.get("s2", "").strip()
     s3 = parsed_word.get("s3", "").strip()
     print(base_d)
-    base_audio = generate_tts_audio(base_d.replace(" ", ""), os.urandom(8).hex())
     if base_audio:
         audio_fields.append({
             "url": None,
