@@ -17,6 +17,20 @@ from PyQt5.QtCore import QSize
 import sys
 from pathlib import Path
 
+# --- Shortcut-aware QTextEdit ---
+class ShortcutAwareTextEdit(QTextEdit):
+    def __init__(self, callback=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.callback = callback
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if (event.modifiers() & Qt.ShiftModifier) and key in (Qt.Key_Return, Qt.Key_Enter):
+            if self.callback and self.toPlainText().strip():
+                self.callback()
+                return
+        super().keyPressEvent(event)
+
 def resource_path(relative_path):
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
@@ -441,7 +455,7 @@ def run_gui():
     disclaimer.setStyleSheet("color: grey; font-size: 10px;")
     main_layout.addWidget(input_label)
     main_layout.addWidget(disclaimer)
-    input_box = QTextEdit()
+    input_box = ShortcutAwareTextEdit()
     input_box.setFixedHeight(300)
     input_box.setTabChangesFocus(True)
     main_layout.addWidget(input_box)
@@ -520,14 +534,30 @@ def run_gui():
     
     def update_clear_button_state():
         clear_btn.setEnabled(bool(input_box.toPlainText().strip() or output_box.toPlainText().strip()))
-    
+
+    add_btn = QPushButton("Add Words to Deck")
+    add_btn.setToolTip(f"Shortcut: {'Shift+Return' if sys.platform == 'darwin' else 'Shift+Enter'}")
+    # Add logic to enable/disable the "Add Words to Deck" button
+    def update_add_button_state():
+        add_btn.setEnabled(bool(input_box.toPlainText().strip()))
+    input_box.textChanged.connect(update_add_button_state)
+    update_add_button_state()
+
     input_box.textChanged.connect(update_clear_button_state)
     output_box.textChanged.connect(update_clear_button_state)
     update_clear_button_state()
     
-    add_btn = QPushButton("Add Words to Deck")
     add_btn.clicked.connect(process_words)
+    input_box.callback = process_words
     button_layout.addWidget(add_btn)
+
+    # Add keyboard shortcut for Add Words to Deck using QAction
+    from PyQt5.QtGui import QKeySequence
+    shortcut_action = QtWidgets.QAction(window)
+    keyseq = QKeySequence("Meta+Return" if sys.platform == "darwin" else "Ctrl+Return")
+    shortcut_action.setShortcut(keyseq)
+    shortcut_action.triggered.connect(process_words)
+    window.addAction(shortcut_action)
     
     main_layout.addLayout(button_layout)
 
@@ -620,7 +650,7 @@ def run_gui():
     phrase_disclaimer = QLabel("Gemini free tier may reject requests with large number of sentences.")
     phrase_disclaimer.setStyleSheet("color: grey; font-size: 10px;")
     phrasemaster_layout.addWidget(phrase_disclaimer)
-    phrase_input_box = QTextEdit()
+    phrase_input_box = ShortcutAwareTextEdit()
     phrase_input_box.setFixedHeight(250)
     phrase_input_box.setTabChangesFocus(True)
     phrasemaster_layout.addWidget(phrase_input_box)
@@ -820,15 +850,27 @@ def run_gui():
     def update_phrase_clear_button_state():
         phrase_clear_btn.setEnabled(bool(phrase_input_box.toPlainText().strip() or phrase_output_box.toPlainText().strip()))
 
+    phrase_add_btn = QPushButton("Add Phrase to Deck")
+    phrase_add_btn.setToolTip(f"Shortcut: {'Shift+Return' if sys.platform == 'darwin' else 'Shift+Enter'}")
+    # Add logic to enable/disable the "Add Phrase to Deck" button
+    def update_phrase_add_button_state():
+        phrase_add_btn.setEnabled(bool(phrase_input_box.toPlainText().strip()))
+    phrase_input_box.textChanged.connect(update_phrase_add_button_state)
+    update_phrase_add_button_state()
+
     phrase_input_box.textChanged.connect(update_phrase_clear_button_state)
     phrase_output_box.textChanged.connect(update_phrase_clear_button_state)
     update_phrase_clear_button_state()
     phrase_button_layout.addWidget(phrase_clear_btn)
-    
-    phrase_add_btn = QPushButton("Add Phrase to Deck")
     phrase_add_btn.clicked.connect(process_phrase)
+    phrase_input_box.callback = process_phrase
     phrase_button_layout.addWidget(phrase_add_btn)
-    
+    # Add keyboard shortcut for Add Phrase to Deck using QAction
+    phrase_shortcut_action = QtWidgets.QAction(window)
+    phrase_keyseq = QKeySequence("Meta+Return" if sys.platform == "darwin" else "Ctrl+Return")
+    phrase_shortcut_action.setShortcut(phrase_keyseq)
+    phrase_shortcut_action.triggered.connect(process_phrase)
+    window.addAction(phrase_shortcut_action)
     phrasemaster_layout.addLayout(phrase_button_layout)
     phrasemaster_tab.setLayout(phrasemaster_layout)
     tabs.addTab(phrasemaster_tab, "PhraseMaster")
