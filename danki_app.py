@@ -504,6 +504,19 @@ def run_gui():
     # Progress bar
     progress_bar = QProgressBar()
     progress_bar.setValue(0)
+    # Set default style for progress bar (styled version)
+    progress_bar.setStyleSheet("""
+    QProgressBar {
+        border: 1px solid #444;
+        border-radius: 5px;
+        text-align: center;
+        height: 10px;
+    }
+    QProgressBar::chunk {
+        background-color: #0078d7;
+        border-radius: 5px;
+    }
+    """)
     main_layout.addWidget(progress_bar)
 
     # Process button
@@ -511,6 +524,19 @@ def run_gui():
         global is_processing
         if is_processing:
             return
+        # Reset progress bar style to blue at the start
+        progress_bar.setStyleSheet("""
+QProgressBar {
+    border: 1px solid #444;
+    border-radius: 5px;
+    text-align: center;
+    height: 10px;
+}
+QProgressBar::chunk {
+    background-color: #0078d7;
+    border-radius: 5px;
+}
+""")
         is_processing = True
         add_btn.setEnabled(False)
         QApplication.processEvents()
@@ -528,6 +554,10 @@ def run_gui():
             output_box.clear()
             progress_bar.setMaximum(len(words))
             progress_bar.setValue(0)
+
+            # --- Success/total counters for status ---
+            success_count = 0
+            total_count = len(words)
 
             for word in words:
                 if not valid_word_pattern.match(word):
@@ -555,12 +585,42 @@ def run_gui():
                     continue
 
                 success, msg = add_to_anki(gemini_data, selected_deck, allow_duplicates)
+                if success:
+                    success_count += 1
                 status = "Success" if success else "Failed"
                 meaning_display = f" → {gemini_data.get('base_e', '')}" if success else ""
                 output_box.append(f"{status} {msg}{meaning_display}\n")
                 progress_bar.setValue(progress_bar.value() + 1)
 
-            output_box.append("Done!")
+            # Set progress bar style: yellow if some fail, blue if all succeed
+            if success_count < total_count:
+                progress_bar.setStyleSheet("""
+                QProgressBar {
+                    border: 1px solid #444;
+                    border-radius: 5px;
+                    text-align: center;
+                    height: 10px;
+                }
+                QProgressBar::chunk {
+                    background-color: #f5c542;
+                    border-radius: 5px;
+                }
+                """)
+            else:
+                progress_bar.setStyleSheet("""
+                QProgressBar {
+                    border: 1px solid #444;
+                    border-radius: 5px;
+                    text-align: center;
+                    height: 10px;
+                }
+                QProgressBar::chunk {
+                    background-color: #0078d7;
+                    border-radius: 5px;
+                }
+                """)
+
+            output_box.append(f"Done! ({success_count}/{total_count})")
         finally:
             is_processing = False
             add_btn.setEnabled(True)
@@ -766,6 +826,19 @@ def run_gui():
     # Progress bar
     phrase_progress_bar = QProgressBar()
     phrase_progress_bar.setValue(0)
+    # Set default style for progress bar (styled version)
+    phrase_progress_bar.setStyleSheet("""
+    QProgressBar {
+        border: 1px solid #444;
+        border-radius: 5px;
+        text-align: center;
+        height: 10px;
+    }
+    QProgressBar::chunk {
+        background-color: #0078d7;
+        border-radius: 5px;
+    }
+    """)
     phrasemaster_layout.addWidget(phrase_progress_bar)
     
     # Clear button
