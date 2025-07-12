@@ -45,25 +45,40 @@ def resource_path(relative_path):
 
 CONFIG_PATH = Path(os.path.expanduser("~/.danki/gemini_config.json"))
 
-def save_api_key(api_key, allow_duplicates=True, include_notes=True):
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_PATH, "w") as f:
-        json.dump({
-            "api_key": api_key,
-            "allow_duplicates": allow_duplicates,
-            "include_notes": include_notes
-        }, f)
-
-def load_api_key():
+# --- Unified config handling ---
+def load_config():
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
             config = json.load(f)
-            return (
-                config.get("api_key"),
-                config.get("allow_duplicates", True),
-                config.get("include_notes", True)
-            )
-    return None, True, True
+    else:
+        config = {}
+    # Ensure default values for all expected keys
+    config.setdefault("api_key", None)
+    config.setdefault("allow_duplicates", True)
+    config.setdefault("include_notes", True)
+    config.setdefault("check_updates_on_startup", True)
+    return config
+
+def save_config(config):
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(config, f)
+
+# Convenience wrappers for backward compatibility
+def save_api_key(api_key, allow_duplicates=True, include_notes=True):
+    config = load_config()
+    config["api_key"] = api_key
+    config["allow_duplicates"] = allow_duplicates
+    config["include_notes"] = include_notes
+    save_config(config)
+
+def load_api_key():
+    config = load_config()
+    return (
+        config.get("api_key"),
+        config.get("allow_duplicates", True),
+        config.get("include_notes", True)
+    )
 
 def is_connected():
     try:
@@ -75,6 +90,8 @@ def is_connected():
 # === CONFIG ===
 NOTE_TYPE = "German Auto"  
 ANKI_ENDPOINT = "http://localhost:8765"
+UPDATE_JSON_URL = "https://raw.githubusercontent.com/udaysidhu99/danki/v1.2/update.json"
+CURRENT_VERSION = "v1.2.0"
 
 # === GEMINI QUERY ===
 def query_gemini(word):
@@ -421,13 +438,18 @@ def run_gui():
     main_layout = QVBoxLayout()
 
     global API_KEY
-    API_KEY, allow_duplicates, include_notes = load_api_key()
+    # --- Load config ---
+    config = load_config()
+    API_KEY = config.get("api_key")
+    allow_duplicates = config.get("allow_duplicates", True)
+    include_notes = config.get("include_notes", True)
     if not API_KEY:
         API_KEY, ok = QInputDialog.getText(window, "Gemini API Key", "Enter your Gemini API Key:")
         if not ok or not API_KEY:
             QMessageBox.critical(window, "Missing API Key", "API key is required to use the app.")
             return
-        save_api_key(API_KEY, allow_duplicates)
+        config["api_key"] = API_KEY
+        save_config(config)
 
     # Deck Dropdown
     deck_layout = QHBoxLayout()
@@ -585,23 +607,34 @@ def run_gui():
     preferences_main_layout = QVBoxLayout()
 
     api_label = QLabel("Gemini API Key:")
-
     api_input_layout = QHBoxLayout()
     api_input = QLineEdit()
     api_input.setPlaceholderText(API_KEY[:5] + "..." if API_KEY else "")
     save_btn = QPushButton("Save API Key")
 
+    # --- Preferences checkboxes and config update logic ---
+    def update_config_value(key, value):
+        config[key] = value
+        save_config(config)
+
     allow_dupes_checkbox = QCheckBox("Allow Duplicate Notes")
     allow_dupes_checkbox.setChecked(allow_duplicates)
-    allow_dupes_checkbox.stateChanged.connect(lambda _: save_api_key(API_KEY, allow_dupes_checkbox.isChecked(), include_notes_checkbox.isChecked()))
+    allow_dupes_checkbox.stateChanged.connect(lambda _: update_config_value("allow_duplicates", allow_dupes_checkbox.isChecked()))
+
+    # New: Checkbox for checking updates on startup
+    check_updates_checkbox = QCheckBox("Check for updates on startup")
+    check_updates_checkbox.setChecked(config.get("check_updates_on_startup", True))
+    check_updates_checkbox.stateChanged.connect(lambda state: update_config_value("check_updates_on_startup", bool(state)))
 
     def save_preferences():
         new_key = api_input.text().strip()
         if not new_key:
             QMessageBox.warning(window, "Missing API Key", "The Gemini API Key cannot be blank.")
             return
-        new_allow_dupes = allow_dupes_checkbox.isChecked()
-        save_api_key(new_key, new_allow_dupes)
+        config["api_key"] = new_key
+        config["allow_duplicates"] = allow_dupes_checkbox.isChecked()
+        config["include_notes"] = include_notes_checkbox.isChecked()
+        save_config(config)
         QMessageBox.information(window, "Saved", "Preferences updated successfully.")
         api_input.clear()
         api_input.setPlaceholderText(new_key[:5] + "...")
@@ -613,6 +646,14 @@ def run_gui():
     api_input_layout.addWidget(save_btn)
     preferences_main_layout.addLayout(api_input_layout)
     preferences_main_layout.addWidget(allow_dupes_checkbox)
+    preferences_main_layout.addWidget(check_updates_checkbox)
+
+    # Add "Check for updates now" button
+    check_updates_now_btn = QPushButton("Check for updates now")
+    def check_updates_now():
+        check_for_update()
+    check_updates_now_btn.clicked.connect(check_updates_now)
+    preferences_main_layout.addWidget(check_updates_now_btn)
     disclaimer = QLabel("Note: Duplicate detection is handled by Anki.\nIt checks across all decks using the same note type.")
     disclaimer.setWordWrap(True)
     disclaimer.setStyleSheet("color: gray; font-size: 10px;")
@@ -620,10 +661,9 @@ def run_gui():
     include_notes_checkbox = QCheckBox("Include grammar/usage notes in PhraseMaster")
     include_notes_checkbox.setChecked(include_notes)
     preferences_main_layout.addWidget(include_notes_checkbox)
-    include_notes_checkbox.stateChanged.connect(lambda _: save_api_key(API_KEY, allow_dupes_checkbox.isChecked(), include_notes_checkbox.isChecked()))
+    include_notes_checkbox.stateChanged.connect(lambda _: update_config_value("include_notes", include_notes_checkbox.isChecked()))
 
     preferences_main_layout.addStretch()
-
     preferences_tab.setLayout(preferences_main_layout)
 
     tabs.addTab(wordmaster_tab, "WordMaster")
@@ -908,6 +948,31 @@ def run_gui():
     window.setLayout(layout)
     window.resize(500, 500)
     window.show()
+
+    def check_for_update():
+        # Respect config setting
+        if not config.get("check_updates_on_startup", True) and not getattr(check_for_update, "_manual", False):
+            return
+        try:
+            response = requests.get(UPDATE_JSON_URL, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            remote_version = data.get("version", "").strip()
+            message = data.get("message", "").strip()
+            url = data.get("url", "").strip()
+
+            if remote_version and remote_version != CURRENT_VERSION:
+                msg_box = QMessageBox()
+                msg_box.setWindowTitle("Update Available")
+                msg_box.setTextFormat(Qt.RichText)
+                msg_box.setText(f"{message}<br><br><a href='{url}'>View update details</a>")
+                msg_box.setStandardButtons(QMessageBox.Ok)
+                msg_box.setTextInteractionFlags(Qt.TextBrowserInteraction)
+                msg_box.exec_()
+        except Exception as e:
+            print(f"[Update Check] Failed to fetch update info: {e}")
+
+    check_for_update()
     sys.exit(app.exec_())
 
 
