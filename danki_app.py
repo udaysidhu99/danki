@@ -913,7 +913,7 @@ QProgressBar::chunk {
                     prompt = (
                         "INSTRUCTIONS: Return ONLY a JSON code block with the following fields.\n"
                         "- german: corrected or original German sentence\n"
-                        "- english: English translation of the sentence\n"
+                        f"- translation: {translation_language} translation of the sentence\n"
                         "- note: (optional) a short grammar or usage note\n"
                         "- error: (optional) only include if input is invalid\n\n"
                         f"Context: {context_text if context_text else 'General'}\n"
@@ -922,7 +922,7 @@ QProgressBar::chunk {
                         "```json\n"
                         "{\n"
                         "  \"german\": \"Ich gehe jeden Tag zur Arbeit.\",\n"
-                        "  \"english\": \"I go to work every day.\",\n"
+                        "  \"translation\": \"I go to work every day.\",\n"
                         "  \"note\": \"'zur' is a contraction of 'zu der'.\"\n"
                         "}\n"
                         "```"
@@ -963,23 +963,25 @@ QProgressBar::chunk {
                             phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
                             continue
 
-                        required_keys = ["german", "english"]
+                        required_keys = ["german", "translation"]
                         if not all(parsed.get(k, "").strip() for k in required_keys):
-                            phrase_output_box.append(f"❌ Incomplete Gemini response. Missing 'german' or 'english'. Parsed keys: {list(parsed.keys())}\n")
+                            phrase_output_box.append(f"❌ Incomplete Gemini response. Missing 'german' or 'translation'. Parsed keys: {list(parsed.keys())}\n")
                             phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
                             continue
 
-                        phrase_output_box.append(f"ENG: {parsed['english']}\nDEU: {parsed['german']}\n")
+                        phrase_output_box.append(f"{translation_language.upper()}: {parsed['translation']}\nDEU: {parsed['german']}\n")
                         german_text = parsed.get("german", "").strip()
-                        english_text = parsed.get("english", "").strip()
+                        translation_text = parsed.get("translation", "").strip()
+                        note_text = parsed.get("note", "") if include_notes_checkbox.isChecked() else ""
+                        audio_text_d = german_text
+                        audio_d = ""  # Will be filled by audio field
                         fields = {
                             "Phrase(German)": german_text,
-                            "Translation": english_text,
-                            "audio_text_d": german_text
+                            "Translation": translation_text,
+                            "note": note_text,
+                            "audio_text_d": audio_text_d,
+                            "audio_d": audio_d,
                         }
-                        if include_notes_checkbox.isChecked():
-                            fields["note"] = parsed.get("note", "")
-                        
                         audio_fields = []
                         base_audio = generate_tts_audio(fields["Phrase(German)"], os.urandom(8).hex())
                         if base_audio:
@@ -989,7 +991,6 @@ QProgressBar::chunk {
                                 "data": base_audio["data"],
                                 "fields": ["audio_d"]
                             })
-                        
                         payload = {
                             "action": "addNote",
                             "version": 6,
