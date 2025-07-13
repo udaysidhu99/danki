@@ -1,4 +1,15 @@
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QPixmap, QCursor
+import random
+# --- Humorous donation messages ---
+DONATION_MESSAGES = [
+    "Donate now, so I don’t have to collect Pfand bottles for caffeine.",
+    "One donation = one less Dativ/Akkusativ breakdown.",
+    "Still not sure if it’s der, die or das? Neither am I. Send help (and coffee).",
+    "Donate or I start naming variables after Pokémon.",
+    "Buy me a coffee or I’ll start learning French instead.",
+]
+import webbrowser
 is_processing = False
 is_processing_phrase = False
 import requests
@@ -691,10 +702,26 @@ QProgressBar::chunk {
         allow_dupes_checkbox.setChecked(allow_duplicates)
         allow_dupes_checkbox.stateChanged.connect(lambda _: update_config_value("allow_duplicates", allow_dupes_checkbox.isChecked()))
 
-        # New: Checkbox for checking updates on startup
+        # Note about duplicate detection
+        duplicate_note_label = QLabel("Note: Duplicate detection is handled by Anki.\nIt checks across all decks using the same note type.")
+        duplicate_note_label.setWordWrap(True)
+        duplicate_note_label.setStyleSheet("color: gray; font-size: 10px; font-style: italic;")
+
+        # Checkbox for including grammar/usage notes
+        include_notes_checkbox = QCheckBox("Include grammar/usage notes in PhraseMaster")
+        include_notes_checkbox.setChecked(include_notes)
+        include_notes_checkbox.stateChanged.connect(lambda _: update_config_value("include_notes", include_notes_checkbox.isChecked()))
+
+        # Checkbox for checking updates on startup
         check_updates_checkbox = QCheckBox("Check for updates on startup")
         check_updates_checkbox.setChecked(config.get("check_updates_on_startup", True))
         check_updates_checkbox.stateChanged.connect(lambda state: update_config_value("check_updates_on_startup", bool(state)))
+
+        # "Check for updates now" button
+        check_updates_now_btn = QPushButton("Check for updates now")
+        def check_updates_now():
+            check_for_update()
+        check_updates_now_btn.clicked.connect(check_updates_now)
 
         # --- Translation language selection dropdown ---
         translation_label = QLabel("Translation language:")
@@ -707,7 +734,6 @@ QProgressBar::chunk {
         translation_row_layout = QHBoxLayout()
         translation_row_layout.addWidget(translation_label)
         translation_row_layout.addWidget(self.translation_dropdown)
-
         save_button = QPushButton("Save")
         def on_save():
             config["translation_language"] = self.translation_dropdown.currentText()
@@ -730,36 +756,55 @@ QProgressBar::chunk {
             QMessageBox.information(window, "Saved", "Preferences updated successfully.")
             api_input.clear()
             api_input.setPlaceholderText(new_key[:5] + "...")
-            # Set the dropdown text in case config was changed elsewhere
             self.translation_dropdown.setCurrentText(config.get("translation_language", "English"))
 
         save_btn.clicked.connect(save_preferences)
 
+        # Now, add widgets in the new order:
+        # 1. Gemini API Key label and input field
         api_input_layout.addWidget(api_label)
         api_input_layout.addWidget(api_input)
         api_input_layout.addWidget(save_btn)
         preferences_main_layout.addLayout(api_input_layout)
-        preferences_main_layout.addWidget(allow_dupes_checkbox)
-        preferences_main_layout.addWidget(check_updates_checkbox)
-        # Add horizontal row for translation language label, dropdown, and Save button
+
+        # 2. Translation language dropdown and Save button
         preferences_main_layout.addLayout(translation_row_layout)
 
-        # Add "Check for updates now" button
-        check_updates_now_btn = QPushButton("Check for updates now")
-        def check_updates_now():
-            check_for_update()
-        check_updates_now_btn.clicked.connect(check_updates_now)
-        preferences_main_layout.addWidget(check_updates_now_btn)
-        disclaimer = QLabel("Note: Duplicate detection is handled by Anki.\nIt checks across all decks using the same note type.")
-        disclaimer.setWordWrap(True)
-        disclaimer.setStyleSheet("color: gray; font-size: 10px;")
-        preferences_main_layout.addWidget(disclaimer)
-        include_notes_checkbox = QCheckBox("Include grammar/usage notes in PhraseMaster")
-        include_notes_checkbox.setChecked(include_notes)
+        # 3. "Allow Duplicate Notes" checkbox
+        preferences_main_layout.addWidget(allow_dupes_checkbox)
+
+        # 4. Note about duplicate detection
+        preferences_main_layout.addWidget(duplicate_note_label)
+
+        # 5. "Include grammar/usage notes in PhraseMaster" checkbox
         preferences_main_layout.addWidget(include_notes_checkbox)
-        include_notes_checkbox.stateChanged.connect(lambda _: update_config_value("include_notes", include_notes_checkbox.isChecked()))
+
+        # 6. "Check for updates on startup" checkbox
+        preferences_main_layout.addWidget(check_updates_checkbox)
+
+        # 7. "Check for updates now" button
+        preferences_main_layout.addWidget(check_updates_now_btn)
+
+        # -- Donation banner (now after check_updates_now_btn) --
+        preferences_main_layout.addSpacing(10)
+        # Add humorous donation text label above the banner
+        donation_text = QLabel(random.choice(DONATION_MESSAGES))
+        donation_text.setAlignment(Qt.AlignCenter)
+        preferences_main_layout.addWidget(donation_text)
+        donation_banner = QLabel()
+        # Build path to image in the same directory as this .py file
+        banner_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "BMAC_banner.png")
+        print(f"[DEBUG] Donation banner path: {banner_path}")
+        pixmap = QPixmap(banner_path)
+        # Display a scaled version for a compact look, preserving retro pixel look
+        donation_banner.setPixmap(pixmap.scaledToWidth(160, Qt.FastTransformation))
+        donation_banner.setAlignment(Qt.AlignCenter)
+        donation_banner.setCursor(QCursor(Qt.PointingHandCursor))
+        donation_banner.mousePressEvent = lambda event: webbrowser.open("https://www.buymeacoffee.com/udaysidhu")
+        preferences_main_layout.addWidget(donation_banner)
 
         preferences_main_layout.addStretch()
+
         preferences_tab.setLayout(preferences_main_layout)
 
         tabs.addTab(wordmaster_tab, "WordMaster")
@@ -1102,6 +1147,9 @@ QProgressBar::chunk {
                     msg_box.setStandardButtons(QMessageBox.Ok)
                     msg_box.setTextInteractionFlags(Qt.TextBrowserInteraction)
                     msg_box.exec_()
+                else:
+                    if getattr(check_for_update, "_manual", False):
+                        QMessageBox.information(None, "Up to Date", f"You're already using the latest version ({CURRENT_VERSION}).")
             except Exception as e:
                 print(f"[Update Check] Failed to fetch update info: {e}")
 
