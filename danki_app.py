@@ -1,13 +1,13 @@
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPixmap, QCursor
+from PyQt5.QtCore import Qt, QTimer, QUrl
+from PyQt5.QtGui import QPixmap, QCursor, QDesktopServices
 import random
 # --- Humorous donation messages ---
 DONATION_MESSAGES = [
-    "Donate now, so I don’t have to collect Pfand bottles for caffeine.",
-    "One donation = one less Dativ/Akkusativ breakdown.",
-    "Still not sure if it’s der, die or das? Neither am I. Send help (and coffee).",
-    "Donate or I start naming variables after Pokémon.",
-    "Buy me a coffee or I’ll start learning French instead.",
+    "Star this repo, so I don’t have to collect Pfand bottles for caffeine.",
+    "One ⭐ = one less Dativ/Akkusativ breakdown.",
+    "Still not sure if it’s der, die or das? Neither am I. Send help (and a star).",
+    "Star this repo or I’ll start naming variables after Pokémon.",
+    "Star this repo or I’ll start learning French instead.",
 ]
 import webbrowser
 is_processing = False
@@ -18,8 +18,7 @@ import re
 import os
 import tempfile
 import base64
-import asyncio
-from edge_tts import Communicate
+import subprocess
 from PyQt5 import QtWidgets
 from PyQt5 import QtGui
 from PyQt5.QtWidgets import (
@@ -104,10 +103,15 @@ ANKI_ENDPOINT = "http://localhost:8765"
 UPDATE_JSON_URL = "https://raw.githubusercontent.com/udaysidhu99/danki/v1.2/update.json"
 CURRENT_VERSION = "v1.2.0"
 
-# === GEMINI QUERY ===
+# === GEMINI QUERY (text only; TTS handled locally) ===
+GEMINI_MODEL = "gemini-2.5-flash-lite"
+
 def query_gemini(word, translation_language="English"):
     global API_KEY
-    GEMINI_ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
+    GEMINI_ENDPOINT = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMINI_MODEL}:generateContent?key={API_KEY}"
+    )
     prompt = (
         f"You are a helpful German language assistant. For the word: **{word}**, provide the following structured information.\n"
         f"""Translate ONLY into {translation_language}. Do NOT include English translations unless {translation_language} is English.
@@ -149,7 +153,6 @@ def query_gemini(word, translation_language="English"):
     body = {
         "contents": [{"parts": [{"text": prompt}]}]
     }
-
     try:
         response = requests.post(GEMINI_ENDPOINT, headers=headers, json=body)
         result = response.json()
@@ -298,6 +301,8 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
         "s3e": str(parsed_word.get("s3e", "") or "")
     }
 
+    print("[ANKI addNote] fields:", json.dumps(fields, ensure_ascii=False))
+
     payload = {
         "action": "addNote",
         "version": 6,
@@ -316,6 +321,7 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
     try:
         response = requests.post(ANKI_ENDPOINT, json=payload)
         result = response.json()
+        print("[ANKI addNote] result:", json.dumps(result, ensure_ascii=False))
         if result.get("error") is None:
             return True, f"Added: {fields['base_d']}"
         else:
@@ -324,21 +330,49 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
         return False, str(e)
 
 def generate_tts_audio(text, filename_hint):
+    """Generate TTS audio using macOS `say` when available.
+
+    Returns a dict with `filename` and base64 `data`, or None on failure.
+    """
+    # Only support TTS via `say` on macOS.
+    if sys.platform != "darwin":
+        print("[TTS] macOS say TTS is only available on macOS (darwin). Skipping.")
+        return None
+
+    # Use a temporary AIFF file, which Anki/mpv can play.
     try:
-        filename = os.path.join(tempfile.gettempdir(), f"sapi5js-{filename_hint}.mp3")
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        communicate = Communicate(text, "de-DE-KatjaNeural")
-        loop.run_until_complete(communicate.save(filename))
-        with open(filename, "rb") as f:
-            audio_data = base64.b64encode(f.read()).decode("utf-8")
-        os.remove(filename)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".aiff") as tmp:
+            tmp_path = tmp.name
+
+        # Call macOS say to synthesize the audio offline.
+        # We don't hardcode a voice; the system default German voice can be set by the user.
+        cmd = ["say", "-o", tmp_path, text]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"[TTS] macOS say failed (code {result.returncode}): {result.stderr.strip()}")
+            os.unlink(tmp_path)
+            return None
+
+        # Read the audio bytes and encode for Anki.
+        with open(tmp_path, "rb") as f:
+            audio_bytes = f.read()
+
+        os.unlink(tmp_path)
+
+        if not audio_bytes:
+            print("[TTS] macOS say produced empty audio.")
+            return None
+
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+        filename = f"macos-say-{filename_hint}.aiff"
+        print(f"[TTS] macOS say generated {len(audio_bytes)} bytes -> {filename}")
+
         return {
             "filename": filename,
-            "data": audio_data
+            "data": audio_b64
         }
     except Exception as e:
-        print(f"[ERROR] TTS generation failed for '{filename_hint}': {e}")
+        print(f"[TTS] macOS say TTS request failed: {e}")
         return None
 
 # === FETCH DECKS FROM ANKI ===
@@ -596,7 +630,9 @@ QProgressBar::chunk {
                             break
 
                     if "error" in gemini_data:
-                        output_box.append(f"Gemini failed for: {word}\n")
+                        error_text = gemini_data.get("error", "Unknown error")
+                        output_box.append(f"Gemini failed for: {word}\nDetails: {error_text}\n")
+                        print(f"[GEMINI ERROR] Word '{word}': {error_text}")
                         progress_bar.setValue(progress_bar.value() + 1)
                         continue
 
@@ -785,25 +821,39 @@ QProgressBar::chunk {
         # 7. "Check for updates now" button
         preferences_main_layout.addWidget(check_updates_now_btn)
 
-        # -- Donation banner (now after check_updates_now_btn) --
+        # -- Donation banner (pinned near bottom) --
+        preferences_main_layout.addStretch()
         preferences_main_layout.addSpacing(10)
-        # Add humorous donation text label above the banner
-        donation_text = QLabel(random.choice(DONATION_MESSAGES))
-        donation_text.setAlignment(Qt.AlignCenter)
-        preferences_main_layout.addWidget(donation_text)
+        # Add donation banner image first, then humorous text underneath
         donation_banner = QLabel()
         # Build path to image in the same directory as this .py file
         banner_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "BMAC_banner.png")
         print(f"[DEBUG] Donation banner path: {banner_path}")
-        pixmap = QPixmap(banner_path)
-        # Display a scaled version for a compact look, preserving retro pixel look
-        donation_banner.setPixmap(pixmap.scaledToWidth(160, Qt.FastTransformation))
+
+        if os.path.exists(banner_path):
+            pixmap = QPixmap(banner_path)
+            # Display a scaled version for a compact look, preserving retro pixel look
+            donation_banner.setPixmap(pixmap.scaledToWidth(160, Qt.FastTransformation))
+        else:
+            # Fallback text link if the PNG is missing when running from source
+            donation_banner.setText("Buy me a coffee")
+            donation_banner.setStyleSheet("color: #ffb300; text-decoration: underline; font-weight: bold;")
+
         donation_banner.setAlignment(Qt.AlignCenter)
         donation_banner.setCursor(QCursor(Qt.PointingHandCursor))
-        donation_banner.mousePressEvent = lambda event: webbrowser.open("https://www.buymeacoffee.com/udaysidhu")
+
+        def _open_donation_link(event=None):
+            try:
+                QDesktopServices.openUrl(QUrl("https://www.buymeacoffee.com/udaysidhu"))
+            except Exception as e:
+                print(f"[Donation] Failed to open link: {e}")
+
+        donation_banner.mousePressEvent = _open_donation_link
         preferences_main_layout.addWidget(donation_banner)
 
-        preferences_main_layout.addStretch()
+        donation_text = QLabel(random.choice(DONATION_MESSAGES))
+        donation_text.setAlignment(Qt.AlignCenter)
+        preferences_main_layout.addWidget(donation_text)
 
         preferences_tab.setLayout(preferences_main_layout)
 
@@ -1124,7 +1174,8 @@ QProgressBar::chunk {
         layout.addWidget(tabs)
 
         window.setLayout(layout)
-        window.resize(500, 500)
+        # Slightly shorter default height so it fits on smaller screens
+        window.resize(500, 440)
         window.show()
 
         def check_for_update():
@@ -1146,7 +1197,17 @@ QProgressBar::chunk {
                     msg_box.setText(f"{message}<br><br><a href='{url}'>View update details</a>")
                     msg_box.setStandardButtons(QMessageBox.Ok)
                     msg_box.setTextInteractionFlags(Qt.TextBrowserInteraction)
+
+                    # Allow disabling future automatic checks directly from this dialog
+                    dont_check_box = QCheckBox("Don't check for updates on startup")
+                    dont_check_box.setChecked(not config.get("check_updates_on_startup", True))
+                    msg_box.setCheckBox(dont_check_box)
+
                     msg_box.exec_()
+
+                    # Persist user's choice
+                    config["check_updates_on_startup"] = not dont_check_box.isChecked()
+                    save_config(config)
                 else:
                     if getattr(check_for_update, "_manual", False):
                         QMessageBox.information(None, "Up to Date", f"You're already using the latest version ({CURRENT_VERSION}).")
