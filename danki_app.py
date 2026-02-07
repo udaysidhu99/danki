@@ -28,6 +28,118 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QSize
 import sys
 from pathlib import Path
+import asyncio
+
+# Try to import edge-tts
+try:
+    import edge_tts
+    EDGE_TTS_AVAILABLE = True
+except ImportError:
+    EDGE_TTS_AVAILABLE = False
+    print("[TTS] edge-tts not installed. Using macOS say only.")
+
+# Session state for Edge TTS
+EDGE_TTS_SESSION_DISABLED = False
+EDGE_TTS_FAILURE_COUNT = 0
+
+# Global variables for offline dictionary
+API_KEY = None
+GERMAN_DICT = None
+
+def load_offline_dictionary():
+    """Load the offline German-English dictionary from JSON file."""
+    global GERMAN_DICT
+    try:
+        # Try 10k dictionary first, then batch1, then combined, then any available
+        possible_paths = [
+            'dictionary/german_english_dict_10k.json',
+            'dictionary/german_english_dict_batch1.json',
+            'dictionary/german_english_dict.json',
+            'dictionary/german_english_dict_combined.json'
+        ]
+        
+        dict_path = None
+        for path in possible_paths:
+            full_path = resource_path(path)
+            if os.path.exists(full_path):
+                dict_path = full_path
+                break
+        
+        if not dict_path:
+            print(f"[DICT] No dictionary file found (this is OK, will use AI only)")
+            GERMAN_DICT = None
+            return
+        
+        with open(dict_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            # Extract the nested 'dictionary' key
+            GERMAN_DICT = data.get('dictionary', {})
+            print(f"✅ Loaded offline dictionary: {len(GERMAN_DICT)} words from {os.path.basename(dict_path)}")
+    except Exception as e:
+        print(f"[DICT] Failed to load offline dictionary: {e}")
+        GERMAN_DICT = None
+
+def lookup_word_in_dictionary(word):
+    """Look up a word in the offline dictionary.
+    
+    Returns the dictionary entry if found, None otherwise.
+    """
+    if not GERMAN_DICT:
+        return None
+    
+    # Try exact match first
+    if word in GERMAN_DICT:
+        return GERMAN_DICT[word]
+    
+    # Try lowercase
+    if word.lower() in GERMAN_DICT:
+        return GERMAN_DICT[word.lower()]
+    
+    # Not found
+    return None
+
+def convert_dict_to_anki_format(dict_entry, word):
+    """Convert dictionary entry format to Anki-compatible format"""
+    # Map dictionary fields to Anki fields
+    result = {
+        "base_d": dict_entry.get("word", word),
+        "base_e": dict_entry.get("translation", ""),
+        "artikel_d": "" if dict_entry.get("gender") is None else (
+            "der" if dict_entry.get("gender") == "masculine" else
+            "die" if dict_entry.get("gender") == "feminine" else
+            "das" if dict_entry.get("gender") == "neuter" else ""
+        ),
+        "plural_d": "",  # Not in our dictionary format
+        "praesens": dict_entry.get("verb_forms", {}).get("present_er", "") if dict_entry.get("verb_forms") else "",
+        "praeteritum": dict_entry.get("verb_forms", {}).get("past_er", "") if dict_entry.get("verb_forms") else "",
+        "perfekt": dict_entry.get("verb_forms", {}).get("perfect", "") if dict_entry.get("verb_forms") else "",
+        "full_d": ", ".join(filter(None, [
+            dict_entry.get("verb_forms", {}).get("present_er", "") if dict_entry.get("verb_forms") else "",
+            dict_entry.get("verb_forms", {}).get("past_er", "") if dict_entry.get("verb_forms") else "",
+            dict_entry.get("verb_forms", {}).get("perfect", "") if dict_entry.get("verb_forms") else ""
+        ])) if dict_entry.get("verb_forms") else dict_entry.get("word", word),
+        "s1": dict_entry.get("example1", ""),
+        "s1e": dict_entry.get("example1_translation", ""),
+        "s2": dict_entry.get("example2", ""),
+        "s2e": dict_entry.get("example2_translation", ""),
+        "s3": dict_entry.get("example3", ""),
+        "s3e": dict_entry.get("example3_translation", "")
+    }
+    
+    # Add conjugation fields for advanced note type (from verb_forms if available)
+    if dict_entry.get("verb_forms"):
+        verb_forms = dict_entry.get("verb_forms", {})
+        result.update({
+            "ich_present": verb_forms.get("present_ich", ""),
+            "du_present": verb_forms.get("present_du", ""),
+            "er_sie_es_present": verb_forms.get("present_er", ""),
+            "ich_past": verb_forms.get("past_ich", ""),
+            "du_past": verb_forms.get("past_du", ""),
+            "er_sie_es_past": verb_forms.get("past_er", ""),
+            "perfect": verb_forms.get("perfect", "")
+        })
+    
+    return result
 
 # --- Shortcut-aware QTextEdit ---
 class ShortcutAwareTextEdit(QTextEdit):
@@ -67,6 +179,9 @@ def load_config():
     config.setdefault("allow_duplicates", True)
     config.setdefault("include_notes", True)
     config.setdefault("check_updates_on_startup", True)
+    config.setdefault("use_edge_tts", False)
+    config.setdefault("always_use_api", False)
+    config.setdefault("use_advanced_cards", False)
     return config
 
 def save_config(config):
@@ -99,6 +214,7 @@ def is_connected():
 
 # === CONFIG ===
 NOTE_TYPE = "German Auto"  
+NOTE_TYPE_ADVANCED = "German Auto Advanced"
 ANKI_ENDPOINT = "http://localhost:8765"
 UPDATE_JSON_URL = "https://raw.githubusercontent.com/udaysidhu99/danki/v1.2/update.json"
 CURRENT_VERSION = "v1.2.0"
@@ -213,7 +329,10 @@ def query_gemini(word, translation_language="English"):
         return {"error": str(e)}
 
 # === ANKI ADD ===
-def add_to_anki(parsed_word, deck_name, allow_duplicates):
+def add_to_anki(parsed_word, deck_name, allow_duplicates, note_type=None):
+    if note_type is None:
+        note_type = NOTE_TYPE
+    
     required_fields = ["base_d", "base_e", "s1"]
     if (
         not parsed_word or
@@ -300,6 +419,18 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
         "s3": str(parsed_word.get("s3", "") or ""),
         "s3e": str(parsed_word.get("s3e", "") or "")
     }
+    
+    # Add conjugation fields for advanced note type
+    if note_type == NOTE_TYPE_ADVANCED:
+        fields.update({
+            "ich_present": str(parsed_word.get("ich_present", "") or ""),
+            "du_present": str(parsed_word.get("du_present", "") or ""),
+            "er_sie_es_present": str(parsed_word.get("er_sie_es_present", "") or ""),
+            "ich_past": str(parsed_word.get("ich_past", "") or ""),
+            "du_past": str(parsed_word.get("du_past", "") or ""),
+            "er_sie_es_past": str(parsed_word.get("er_sie_es_past", "") or ""),
+            "perfect": str(parsed_word.get("perfect", "") or "")
+        })
 
     print("[ANKI addNote] fields:", json.dumps(fields, ensure_ascii=False))
 
@@ -309,7 +440,7 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
         "params": {
             "note": {
                 "deckName": deck_name,
-                "modelName": NOTE_TYPE,
+                "modelName": note_type,
                 "fields": fields,
                 "options": {"allowDuplicate": allow_duplicates},
                 "tags": ["auto-added"],
@@ -329,31 +460,104 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates):
     except Exception as e:
         return False, str(e)
 
-def generate_tts_audio(text, filename_hint):
-    """Generate TTS audio using macOS `say` when available.
+def test_edge_tts_available():
+    """Test if Edge TTS is available and working."""
+    if not EDGE_TTS_AVAILABLE:
+        return False
+    try:
+        # Quick test with minimal text
+        async def test():
+            communicate = edge_tts.Communicate("test", "de-DE-KatjaNeural")
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    return True
+            return False
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(test())
+        loop.close()
+        return result
+    except Exception as e:
+        print(f"[TTS] Edge TTS test failed: {e}")
+        return False
 
+def generate_edge_tts_audio(text, filename_hint):
+    """Generate TTS audio using Edge TTS (requires internet).
+    
     Returns a dict with `filename` and base64 `data`, or None on failure.
     """
-    # Only support TTS via `say` on macOS.
+    global EDGE_TTS_FAILURE_COUNT, EDGE_TTS_SESSION_DISABLED
+    
+    if not EDGE_TTS_AVAILABLE or EDGE_TTS_SESSION_DISABLED:
+        return None
+    
+    try:
+        async def generate():
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                tmp_path = tmp.name
+            
+            # Use German neural voice
+            communicate = edge_tts.Communicate(text, "de-DE-KatjaNeural")
+            await communicate.save(tmp_path)
+            
+            with open(tmp_path, "rb") as f:
+                audio_bytes = f.read()
+            
+            os.unlink(tmp_path)
+            return audio_bytes
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        audio_bytes = loop.run_until_complete(generate())
+        loop.close()
+        
+        if not audio_bytes:
+            raise Exception("Edge TTS produced empty audio")
+        
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+        filename = f"edge-tts-{filename_hint}.mp3"
+        print(f"[TTS] Edge TTS generated {len(audio_bytes)} bytes -> {filename}")
+        
+        # Reset failure count on success
+        EDGE_TTS_FAILURE_COUNT = 0
+        
+        return {
+            "filename": filename,
+            "data": audio_b64
+        }
+    except Exception as e:
+        print(f"[TTS] Edge TTS failed: {e}")
+        EDGE_TTS_FAILURE_COUNT += 1
+        
+        # Disable Edge TTS for session after 3 consecutive failures
+        if EDGE_TTS_FAILURE_COUNT >= 3:
+            EDGE_TTS_SESSION_DISABLED = True
+            print("[TTS] Edge TTS disabled for this session after 3 failures")
+        
+        return None
+
+def generate_macos_say_audio(text, filename_hint):
+    """Generate TTS audio using macOS say (offline, always available on macOS).
+    
+    Returns a dict with `filename` and base64 `data`, or None on failure.
+    """
     if sys.platform != "darwin":
         print("[TTS] macOS say TTS is only available on macOS (darwin). Skipping.")
         return None
 
-    # Use a temporary AIFF file, which Anki/mpv can play.
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".aiff") as tmp:
             tmp_path = tmp.name
 
-        # Call macOS say to synthesize the audio offline.
-        # We don't hardcode a voice; the system default German voice can be set by the user.
-        cmd = ["say", "-o", tmp_path, text]
+        # Use Anna voice for German
+        cmd = ["say", "-v", "Anna", "-o", tmp_path, text]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"[TTS] macOS say failed (code {result.returncode}): {result.stderr.strip()}")
             os.unlink(tmp_path)
             return None
 
-        # Read the audio bytes and encode for Anki.
         with open(tmp_path, "rb") as f:
             audio_bytes = f.read()
 
@@ -374,6 +578,23 @@ def generate_tts_audio(text, filename_hint):
     except Exception as e:
         print(f"[TTS] macOS say TTS request failed: {e}")
         return None
+
+def generate_tts_audio(text, filename_hint):
+    """Generate TTS audio using Edge TTS (if enabled) with macOS say fallback.
+    
+    Returns a dict with `filename` and base64 `data`, or None on failure.
+    """
+    config = load_config()
+    
+    # Try Edge TTS first if enabled and available
+    if config.get("use_edge_tts", False):
+        edge_audio = generate_edge_tts_audio(text, filename_hint)
+        if edge_audio:
+            return edge_audio
+        print("[TTS] Edge TTS failed, falling back to macOS say")
+    
+    # Fallback to macOS say (offline, always works)
+    return generate_macos_say_audio(text, filename_hint)
 
 # === FETCH DECKS FROM ANKI ===
 def get_anki_decks():
@@ -411,8 +632,10 @@ def get_wordmaster_decks():
         if note_count == 0:
             wordmaster_decks.append(deck)
         else:
+            # Check for both basic and advanced German note types
             german_note_count = find_note_count(f'deck:"{deck}" note:"{NOTE_TYPE}"')
-            if german_note_count > 0:
+            german_advanced_count = find_note_count(f'deck:"{deck}" note:"{NOTE_TYPE_ADVANCED}"')
+            if german_note_count > 0 or german_advanced_count > 0:
                 wordmaster_decks.append(deck)
     return wordmaster_decks
 
@@ -458,6 +681,19 @@ def is_duplicate(base_d_value, base_a_value):
 
 # === GUI ===
 def run_gui():
+    global EDGE_TTS_SESSION_DISABLED
+    
+    # Test Edge TTS availability at startup if enabled
+    config = load_config()
+    if config.get("use_edge_tts", False) and EDGE_TTS_AVAILABLE:
+        print("[TTS] Testing Edge TTS availability...")
+        if not test_edge_tts_available():
+            EDGE_TTS_SESSION_DISABLED = True
+            print("[TTS] Edge TTS unavailable, disabled for this session")
+    
+    # Load offline dictionary
+    load_offline_dictionary()
+    
     try:
         if sys.platform == "win32":
             import ctypes
@@ -493,13 +729,33 @@ def run_gui():
         API_KEY = config.get("api_key")
         allow_duplicates = config.get("allow_duplicates", True)
         include_notes = config.get("include_notes", True)
+        
+        # Only prompt for API key if not already set
         if not API_KEY:
-            API_KEY, ok = QInputDialog.getText(window, "Gemini API Key", "Enter your Gemini API Key:")
-            if not ok or not API_KEY:
-                QMessageBox.critical(window, "Missing API Key", "API key is required to use the app.")
-                return
-            config["api_key"] = API_KEY
-            save_config(config)
+            # Create a custom dialog with Skip option
+            msg_box = QMessageBox(window)
+            msg_box.setWindowTitle("Gemini API Key")
+            msg_box.setText("Would you like to add a Gemini API key?\n\nYou can skip this and use offline dictionary mode only.")
+            msg_box.setInformativeText("Note: You can add an API key later in Preferences.")
+            
+            enter_btn = msg_box.addButton("Enter API Key", QMessageBox.AcceptRole)
+            skip_btn = msg_box.addButton("Skip (Offline Mode)", QMessageBox.RejectRole)
+            msg_box.setDefaultButton(enter_btn)
+            
+            msg_box.exec_()
+            
+            if msg_box.clickedButton() == enter_btn:
+                API_KEY, ok = QInputDialog.getText(window, "Gemini API Key", "Enter your Gemini API Key:")
+                if ok and API_KEY:
+                    config["api_key"] = API_KEY
+                    save_config(config)
+                    QMessageBox.information(window, "API Key Saved", "Gemini API key has been saved successfully.")
+                else:
+                    API_KEY = None
+                    QMessageBox.information(window, "Offline Mode", "Running in offline mode. Only dictionary lookups will be available.\n\nYou can add an API key later in Preferences.")
+            else:
+                API_KEY = None
+                QMessageBox.information(window, "Offline Mode", "Running in offline mode. Only dictionary lookups will be available.\n\nYou can add an API key later in Preferences.")
 
         # Deck Dropdown
         deck_layout = QHBoxLayout()
@@ -591,8 +847,9 @@ QProgressBar::chunk {
             add_btn.setEnabled(False)
             QApplication.processEvents()
             try:
-                if not is_connected():
-                    QMessageBox.critical(window, "No Internet", "An internet connection is required to use Gemini.")
+                # Only check internet if we have an API key and might need it
+                if API_KEY and not is_connected():
+                    QMessageBox.critical(window, "No Internet", "An internet connection is required to use Gemini API.\n\nYou can still use offline dictionary mode if available.")
                     return
 
                 words_raw = input_box.toPlainText()
@@ -611,8 +868,20 @@ QProgressBar::chunk {
 
                 # Read selected translation language from config
                 translation_language = config.get("translation_language", "English")
-                # If you use build_word_prompt, pass translation_language there
-                # Example: prompt = build_word_prompt(words, include_notes, translation_language)
+                
+                # Read preferences for dictionary and note type
+                always_use_api = config.get("always_use_api", False)
+                use_advanced_cards = config.get("use_advanced_cards", False)
+                
+                # Debug output
+                print(f"[DEBUG] always_use_api: {always_use_api}")
+                print(f"[DEBUG] translation_language: {translation_language}")
+                print(f"[DEBUG] GERMAN_DICT loaded: {GERMAN_DICT is not None}")
+                if GERMAN_DICT:
+                    print(f"[DEBUG] GERMAN_DICT size: {len(GERMAN_DICT)} words")
+                
+                # Select note type based on preference
+                selected_note_type = NOTE_TYPE_ADVANCED if use_advanced_cards else NOTE_TYPE
 
                 for word in words:
                     if not valid_word_pattern.match(word):
@@ -623,11 +892,37 @@ QProgressBar::chunk {
                     output_box.append(f"Processing: {word}...")
                     QApplication.processEvents()
 
-                    for attempt in range(4):
-                        gemini_data = query_gemini(word, translation_language)
-                        if "error" not in gemini_data:
-                            print(f"[DEBUG] Gemini raw data for '{word}':\n{json.dumps(gemini_data, indent=2, ensure_ascii=False)}")
-                            break
+                    gemini_data = None
+                    source = "Unknown"
+                    
+                    # Try offline dictionary first (only for German->English, if not disabled)
+                    if not always_use_api and translation_language == "English" and GERMAN_DICT:
+                        print(f"[DEBUG] Checking dictionary for: {word}")
+                        dict_entry = lookup_word_in_dictionary(word)
+                        if dict_entry:
+                            print(f"[DEBUG] Found '{word}' in dictionary!")
+                            gemini_data = convert_dict_to_anki_format(dict_entry, word)
+                            source = "Dictionary"
+                            QApplication.processEvents()
+                        else:
+                            print(f"[DEBUG] '{word}' not found in dictionary")
+                    else:
+                        print(f"[DEBUG] Skipping dictionary: always_use_api={always_use_api}, lang={translation_language}, dict_loaded={GERMAN_DICT is not None}")
+                    
+                    # Fall back to Gemini API if not found in dictionary
+                    if gemini_data is None:
+                        # Check if API key is available
+                        if not API_KEY:
+                            output_box.append(f"  ✗ Not in dictionary and no API key configured (offline mode)\n")
+                            progress_bar.setValue(progress_bar.value() + 1)
+                            continue
+                        
+                        for attempt in range(4):
+                            gemini_data = query_gemini(word, translation_language)
+                            if "error" not in gemini_data:
+                                source = "AI (Gemini)"
+                                print(f"[DEBUG] Gemini raw data for '{word}':\n{json.dumps(gemini_data, indent=2, ensure_ascii=False)}")
+                                break
 
                     if "error" in gemini_data:
                         error_text = gemini_data.get("error", "Unknown error")
@@ -641,12 +936,13 @@ QProgressBar::chunk {
                         progress_bar.setValue(progress_bar.value() + 1)
                         continue
 
-                    success, msg = add_to_anki(gemini_data, selected_deck, allow_duplicates)
+                    success, msg = add_to_anki(gemini_data, selected_deck, allow_duplicates, selected_note_type)
                     if success:
                         success_count += 1
-                    status = "Success" if success else "Failed"
-                    meaning_display = f" → {gemini_data.get('base_e', '')}" if success else ""
-                    output_box.append(f"{status} {msg}{meaning_display}\n")
+                    status = "✓" if success else "✗"
+                    meaning_display = f"{gemini_data.get('base_e', '')}"
+                    source_display = f"[{source}]" if success else ""
+                    output_box.append(f"{status} {gemini_data.get('base_d', word)} → {meaning_display} {source_display}\n")
                     progress_bar.setValue(progress_bar.value() + 1)
 
                 # Set progress bar style: yellow if some fail, blue if all succeed
@@ -756,7 +1052,9 @@ QProgressBar::chunk {
         # "Check for updates now" button
         check_updates_now_btn = QPushButton("Check for updates now")
         def check_updates_now():
+            check_for_update._manual = True
             check_for_update()
+            check_for_update._manual = False
         check_updates_now_btn.clicked.connect(check_updates_now)
 
         # --- Translation language selection dropdown ---
@@ -765,6 +1063,11 @@ QProgressBar::chunk {
         self.translation_dropdown = QComboBox()
         self.translation_dropdown.addItems(["English", "Spanish", "Hindi", "French"])
         self.translation_dropdown.setCurrentText(config.get("translation_language", "English"))
+        
+        # Create "Always use AI" checkbox first (needed for language change handler)
+        always_use_api_checkbox = QCheckBox("Always use AI (bypass offline dictionary)")
+        always_use_api_checkbox.setChecked(config.get("always_use_api", False))
+        always_use_api_checkbox.stateChanged.connect(lambda state: update_config_value("always_use_api", bool(state)))
 
         # Horizontal layout for translation label, dropdown, and Save button
         translation_row_layout = QHBoxLayout()
@@ -777,6 +1080,22 @@ QProgressBar::chunk {
             save_config(config)
         save_button.clicked.connect(on_save)
         translation_row_layout.addWidget(save_button)
+        translation_row_layout.addStretch()
+        
+        # Auto-update checkbox based on language selection
+        def on_language_changed():
+            selected_lang = self.translation_dropdown.currentText()
+            if selected_lang != "English":
+                always_use_api_checkbox.setChecked(True)
+                always_use_api_checkbox.setEnabled(False)
+            else:
+                always_use_api_checkbox.setEnabled(True)
+                always_use_api_checkbox.setChecked(config.get("always_use_api", False))
+        
+        self.translation_dropdown.currentIndexChanged.connect(on_language_changed)
+        
+        # Initialize checkbox state based on current language
+        on_language_changed()
 
         def save_preferences():
             new_key = api_input.text().strip()
@@ -805,20 +1124,48 @@ QProgressBar::chunk {
 
         # 2. Translation language dropdown and Save button
         preferences_main_layout.addLayout(translation_row_layout)
+        
+        # Add info label for offline dictionary availability
+        offline_dict_info_label = QLabel("Note: Offline dictionary only available for English translations")
+        offline_dict_info_label.setStyleSheet("color: #888; font-size: 10px;")
+        preferences_main_layout.addWidget(offline_dict_info_label)
 
         # 3. "Allow Duplicate Notes" checkbox
         preferences_main_layout.addWidget(allow_dupes_checkbox)
 
         # 4. Note about duplicate detection
         preferences_main_layout.addWidget(duplicate_note_label)
+        
+        # 5. "Always use AI (bypass offline dictionary)" checkbox (already created above)
+        preferences_main_layout.addWidget(always_use_api_checkbox)
+        
+        # 6. "Use Advanced Cards (with conjugations)" checkbox
+        use_advanced_cards_checkbox = QCheckBox("Use Advanced Cards (includes verb conjugations)")
+        use_advanced_cards_checkbox.setChecked(config.get("use_advanced_cards", False))
+        use_advanced_cards_checkbox.stateChanged.connect(lambda state: update_config_value("use_advanced_cards", bool(state)))
+        preferences_main_layout.addWidget(use_advanced_cards_checkbox)
+        
+        advanced_cards_note = QLabel("Note: Advanced cards use 'German Auto Advanced' note type")
+        advanced_cards_note.setStyleSheet("color: #888; font-size: 10px; margin-left: 20px;")
+        preferences_main_layout.addWidget(advanced_cards_note)
 
-        # 5. "Include grammar/usage notes in PhraseMaster" checkbox
+        # 7. "Include grammar/usage notes in PhraseMaster" checkbox
         preferences_main_layout.addWidget(include_notes_checkbox)
 
-        # 6. "Check for updates on startup" checkbox
+        # 8. "Check for updates on startup" checkbox
         preferences_main_layout.addWidget(check_updates_checkbox)
+        
+        # 9. "Use Edge TTS" checkbox
+        use_edge_tts_checkbox = QCheckBox("Use Edge TTS (experimental, requires internet)")
+        use_edge_tts_checkbox.setChecked(config.get("use_edge_tts", False))
+        use_edge_tts_checkbox.stateChanged.connect(lambda state: update_config_value("use_edge_tts", bool(state)))
+        preferences_main_layout.addWidget(use_edge_tts_checkbox)
+        
+        edge_tts_note = QLabel("Note: Falls back to macOS say if Edge TTS fails")
+        edge_tts_note.setStyleSheet("color: #888; font-size: 10px; margin-left: 20px;")
+        preferences_main_layout.addWidget(edge_tts_note)
 
-        # 7. "Check for updates now" button
+        # 10. "Check for updates now" button
         preferences_main_layout.addWidget(check_updates_now_btn)
 
         # -- Donation banner (pinned near bottom) --
@@ -827,7 +1174,7 @@ QProgressBar::chunk {
         # Add donation banner image first, then humorous text underneath
         donation_banner = QLabel()
         # Build path to image in the same directory as this .py file
-        banner_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "BMAC_banner.png")
+        banner_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "githubstar_banner.png")
         print(f"[DEBUG] Donation banner path: {banner_path}")
 
         if os.path.exists(banner_path):
@@ -836,7 +1183,7 @@ QProgressBar::chunk {
             donation_banner.setPixmap(pixmap.scaledToWidth(160, Qt.FastTransformation))
         else:
             # Fallback text link if the PNG is missing when running from source
-            donation_banner.setText("Buy me a coffee")
+            donation_banner.setText("⭐ Star me on GitHub")
             donation_banner.setStyleSheet("color: #ffb300; text-decoration: underline; font-weight: bold;")
 
         donation_banner.setAlignment(Qt.AlignCenter)
@@ -844,7 +1191,7 @@ QProgressBar::chunk {
 
         def _open_donation_link(event=None):
             try:
-                QDesktopServices.openUrl(QUrl("https://www.buymeacoffee.com/udaysidhu"))
+                QDesktopServices.openUrl(QUrl("https://github.com/udaysidhu99/danki"))
             except Exception as e:
                 print(f"[Donation] Failed to open link: {e}")
 
