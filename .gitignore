@@ -1,2 +1,41 @@
-gemini_config.jsondictionary/apikeys.txt
+# Configuration files with sensitive data
+gemini_config.json
 dictionary/apikeys.txt
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude AI assistant
+.claude/
+
+# Dictionary build artifacts
+dictionary/*.log
+dictionary/*_errors.log
+dictionary/german_english_dict_10k_part_*.json
+dictionary/monitor_progress.sh
+
+# Temporary files
+*.tmp
+*.bak
+apikeys.txt.rtf
