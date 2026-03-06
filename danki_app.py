@@ -229,8 +229,8 @@ def is_connected():
 NOTE_TYPE = "German Auto"  
 NOTE_TYPE_ADVANCED = "German Auto Advanced"
 ANKI_ENDPOINT = "http://localhost:8765"
-UPDATE_JSON_URL = "https://raw.githubusercontent.com/udaysidhu99/danki/v1.2/update.json"
-CURRENT_VERSION = "v1.2.0"
+UPDATE_JSON_URL = "https://raw.githubusercontent.com/udaysidhu99/danki/main/update.json"
+CURRENT_VERSION = "v2.0.0-beta.1"
 
 # === AI QUERY (supports Gemini and OpenAI) ===
 GEMINI_MODEL = "gemini-2.5-flash-lite"

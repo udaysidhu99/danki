@@ -1,8 +1,8 @@
 {
-  "version": "v1.3.0",
-  "message": "🎉 A new update is available!\n\n• Improved TTS\n• Windows dark mode\n• Bug fixes",
+  "version": "v2.0.0-beta.1",
+  "message": "🎉 Danki v2.0.0 Beta 1 is here!\n\n• OpenAI API support (alongside Gemini)\n• Expanded 20K word offline dictionary\n• Improved duplicate detection with user feedback\n• Article bug fixes for TTS and card display\n• Provider auto-detection from API key format",
   "url": "https://github.com/udaysidhu99/danki/releases/latest",
   "show_message": true,
-  "dev_message": "Shiny new version"
+  "dev_message": "First v2 beta — dual AI provider support"
 }
 
