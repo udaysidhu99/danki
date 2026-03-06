@@ -23,7 +23,7 @@ from PyQt5 import QtWidgets
 from PyQt5 import QtGui
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QTextEdit, QVBoxLayout,
-    QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit, QCheckBox, QToolButton
+    QComboBox, QHBoxLayout, QMessageBox, QInputDialog, QProgressBar, QLineEdit, QCheckBox, QToolButton, QDialog
 )
 from PyQt5.QtCore import QSize
 import sys
@@ -44,14 +44,16 @@ EDGE_TTS_FAILURE_COUNT = 0
 
 # Global variables for offline dictionary
 API_KEY = None
+API_PROVIDER = "gemini"  # "gemini" or "openai"
 GERMAN_DICT = None
 
 def load_offline_dictionary():
     """Load the offline German-English dictionary from JSON file."""
     global GERMAN_DICT
     try:
-        # Try 10k dictionary first, then batch1, then combined, then any available
+        # Try largest dictionary first, then fall back to smaller ones
         possible_paths = [
+            'dictionary/german_english_dict_20k.json',
             'dictionary/german_english_dict_10k.json',
             'dictionary/german_english_dict_batch1.json',
             'dictionary/german_english_dict.json',
@@ -113,11 +115,7 @@ def convert_dict_to_anki_format(dict_entry, word):
         "praesens": dict_entry.get("verb_forms", {}).get("present_er", "") if dict_entry.get("verb_forms") else "",
         "praeteritum": dict_entry.get("verb_forms", {}).get("past_er", "") if dict_entry.get("verb_forms") else "",
         "perfekt": dict_entry.get("verb_forms", {}).get("perfect", "") if dict_entry.get("verb_forms") else "",
-        "full_d": ", ".join(filter(None, [
-            dict_entry.get("verb_forms", {}).get("present_er", "") if dict_entry.get("verb_forms") else "",
-            dict_entry.get("verb_forms", {}).get("past_er", "") if dict_entry.get("verb_forms") else "",
-            dict_entry.get("verb_forms", {}).get("perfect", "") if dict_entry.get("verb_forms") else ""
-        ])) if dict_entry.get("verb_forms") else dict_entry.get("word", word),
+        "full_d": "", # Will be populated below after we know if there's an article
         "s1": dict_entry.get("example1", ""),
         "s1e": dict_entry.get("example1_translation", ""),
         "s2": dict_entry.get("example2", ""),
@@ -125,6 +123,20 @@ def convert_dict_to_anki_format(dict_entry, word):
         "s3": dict_entry.get("example3", ""),
         "s3e": dict_entry.get("example3_translation", "")
     }
+    
+    # Populate full_d: conjugations if verb, or article + word if noun
+    if dict_entry.get("verb_forms"):
+        result["full_d"] = ", ".join(filter(None, [
+            dict_entry.get("verb_forms", {}).get("present_er", ""),
+            dict_entry.get("verb_forms", {}).get("past_er", ""),
+            dict_entry.get("verb_forms", {}).get("perfect", "")
+        ]))
+    elif result["artikel_d"]:
+        # For nouns with article, include it in full_d
+        result["full_d"] = f"{result['artikel_d']} {result['base_d']}"
+    else:
+        # For words without article, just use the word
+        result["full_d"] = result["base_d"]
     
     # Add conjugation fields for advanced note type (from verb_forms if available)
     if dict_entry.get("verb_forms"):
@@ -176,6 +188,7 @@ def load_config():
         config = {}
     # Ensure default values for all expected keys
     config.setdefault("api_key", None)
+    config.setdefault("api_provider", "gemini")  # "gemini" or "openai"
     config.setdefault("allow_duplicates", True)
     config.setdefault("include_notes", True)
     config.setdefault("check_updates_on_startup", True)
@@ -219,15 +232,68 @@ ANKI_ENDPOINT = "http://localhost:8765"
 UPDATE_JSON_URL = "https://raw.githubusercontent.com/udaysidhu99/danki/v1.2/update.json"
 CURRENT_VERSION = "v1.2.0"
 
-# === GEMINI QUERY (text only; TTS handled locally) ===
+# === AI QUERY (supports Gemini and OpenAI) ===
 GEMINI_MODEL = "gemini-2.5-flash-lite"
+OPENAI_MODEL = "gpt-4o-mini"
 
-def query_gemini(word, translation_language="English"):
-    global API_KEY
-    GEMINI_ENDPOINT = (
+def detect_provider_from_key(key):
+    """Auto-detect API provider from key format."""
+    if not key:
+        return None
+    if key.startswith("sk-"):
+        return "openai"
+    if key.startswith("AIza"):
+        return "gemini"
+    return None  # Unknown format
+
+def get_provider_display_name():
+    """Get human-readable name for current provider."""
+    return "OpenAI" if API_PROVIDER == "openai" else "Gemini"
+
+def _query_gemini_raw(prompt):
+    """Send a prompt to Gemini and return the raw text response."""
+    endpoint = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{GEMINI_MODEL}:generateContent?key={API_KEY}"
     )
+    headers = {'Content-Type': 'application/json'}
+    body = {"contents": [{"parts": [{"text": prompt}]}]}
+    response = requests.post(endpoint, headers=headers, json=body)
+    result = response.json()
+    if "candidates" not in result:
+        raise ValueError(f"API error: {result.get('error', 'No candidates returned')}")
+    return result["candidates"][0]["content"]["parts"][0]["text"]
+
+def _query_openai_raw(prompt):
+    """Send a prompt to OpenAI and return the raw text response."""
+    endpoint = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {API_KEY}'
+    }
+    body = {
+        "model": OPENAI_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a German language expert. Always respond with valid JSON wrapped in a ```json code block."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3
+    }
+    response = requests.post(endpoint, headers=headers, json=body, timeout=30)
+    result = response.json()
+    if "choices" not in result:
+        raise ValueError(f"API error: {result.get('error', 'No choices returned')}")
+    return result["choices"][0]["message"]["content"]
+
+def query_ai_raw(prompt):
+    """Route prompt to the configured AI provider and return raw text."""
+    if API_PROVIDER == "openai":
+        return _query_openai_raw(prompt)
+    else:
+        return _query_gemini_raw(prompt)
+
+def query_gemini(word, translation_language="English"):
+    global API_KEY
     prompt = (
         f"You are a helpful German language assistant. For the word: **{word}**, provide the following structured information.\n"
         f"""Translate ONLY into {translation_language}. Do NOT include English translations unless {translation_language} is English.
@@ -265,16 +331,8 @@ def query_gemini(word, translation_language="English"):
         "```"
     )
 
-    headers = {'Content-Type': 'application/json'}
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
     try:
-        response = requests.post(GEMINI_ENDPOINT, headers=headers, json=body)
-        result = response.json()
-        if "candidates" not in result:
-            return {"error": f"Gemini error: {result.get('error', 'No candidates returned')}"}
-        content = result["candidates"][0]["content"]["parts"][0]["text"]
+        content = query_ai_raw(prompt)
 
         match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
         if not match:
@@ -339,8 +397,8 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates, note_type=None):
         "error" in parsed_word or
         any(not str(parsed_word.get(field, "")).strip() for field in required_fields)
     ):
-        print(f"[DEBUG] Incomplete Gemini response for word. Full content:\n{json.dumps(parsed_word, indent=2, ensure_ascii=False)}")
-        return False, "Cannot create note: required fields missing or Gemini failed."
+        print(f"[DEBUG] Incomplete AI response for word. Full content:\n{json.dumps(parsed_word, indent=2, ensure_ascii=False)}")
+        return False, "Cannot create note: required fields missing or AI query failed."
 
     # === Fallback for full_d ===
     if not parsed_word.get("full_d"):
@@ -362,7 +420,7 @@ def add_to_anki(parsed_word, deck_name, allow_duplicates, note_type=None):
         base_for_audio = f"{artikel} {base_d}"
     else:
         base_for_audio = base_d
-    base_audio = generate_tts_audio(base_for_audio.replace(" ", ""), os.urandom(8).hex())
+    base_audio = generate_tts_audio(base_for_audio, os.urandom(8).hex())
     s1 = parsed_word.get("s1", "").strip()
     s2 = parsed_word.get("s2", "").strip()
     s3 = parsed_word.get("s3", "").strip()
@@ -724,38 +782,80 @@ def run_gui():
         main_layout = QVBoxLayout()
 
         global API_KEY
+        global API_PROVIDER
         # --- Load config ---
         config = load_config()
         API_KEY = config.get("api_key")
+        API_PROVIDER = config.get("api_provider", "gemini")
         allow_duplicates = config.get("allow_duplicates", True)
         include_notes = config.get("include_notes", True)
         
         # Only prompt for API key if not already set
         if not API_KEY:
-            # Create a custom dialog with Skip option
-            msg_box = QMessageBox(window)
-            msg_box.setWindowTitle("Gemini API Key")
-            msg_box.setText("Would you like to add a Gemini API key?\n\nYou can skip this and use offline dictionary mode only.")
-            msg_box.setInformativeText("Note: You can add an API key later in Preferences.")
-            
-            enter_btn = msg_box.addButton("Enter API Key", QMessageBox.AcceptRole)
-            skip_btn = msg_box.addButton("Skip (Offline Mode)", QMessageBox.RejectRole)
-            msg_box.setDefaultButton(enter_btn)
-            
-            msg_box.exec_()
-            
-            if msg_box.clickedButton() == enter_btn:
-                API_KEY, ok = QInputDialog.getText(window, "Gemini API Key", "Enter your Gemini API Key:")
-                if ok and API_KEY:
-                    config["api_key"] = API_KEY
-                    save_config(config)
-                    QMessageBox.information(window, "API Key Saved", "Gemini API key has been saved successfully.")
-                else:
-                    API_KEY = None
-                    QMessageBox.information(window, "Offline Mode", "Running in offline mode. Only dictionary lookups will be available.\n\nYou can add an API key later in Preferences.")
-            else:
+            # Create a custom dialog with provider selection and Skip option
+            dialog = QDialog(window)
+            dialog.setWindowTitle("AI Provider Setup")
+            dialog.setMinimumWidth(400)
+            dlg_layout = QVBoxLayout()
+
+            dlg_layout.addWidget(QLabel("Would you like to add an AI API key?\n\nYou can skip this and use offline dictionary mode only."))
+            dlg_layout.addWidget(QLabel("Note: You can change this later in Preferences."))
+
+            # Provider dropdown
+            provider_row = QHBoxLayout()
+            provider_row.addWidget(QLabel("AI Provider:"))
+            provider_combo = QComboBox()
+            provider_combo.addItems(["Gemini", "OpenAI"])
+            provider_combo.setCurrentText("Gemini" if API_PROVIDER == "gemini" else "OpenAI")
+            provider_row.addWidget(provider_combo)
+            provider_row.addStretch()
+            dlg_layout.addLayout(provider_row)
+
+            # API key input
+            key_row = QHBoxLayout()
+            key_row.addWidget(QLabel("API Key:"))
+            key_input = QLineEdit()
+            key_input.setPlaceholderText("Enter your API key...")
+            key_row.addWidget(key_input)
+            dlg_layout.addLayout(key_row)
+
+            # Buttons
+            btn_row = QHBoxLayout()
+            enter_btn = QPushButton("Save API Key")
+            skip_btn = QPushButton("Skip (Offline Mode)")
+            btn_row.addWidget(enter_btn)
+            btn_row.addWidget(skip_btn)
+            dlg_layout.addLayout(btn_row)
+
+            dialog.setLayout(dlg_layout)
+
+            def on_enter():
+                global API_KEY, API_PROVIDER
+                key = key_input.text().strip()
+                if not key:
+                    QMessageBox.warning(dialog, "Missing API Key", "The API Key cannot be blank.")
+                    return
+                API_KEY = key
+                API_PROVIDER = "openai" if provider_combo.currentText() == "OpenAI" else "gemini"
+                # Auto-detect provider from key format if user picked wrong one
+                detected = detect_provider_from_key(key)
+                if detected and detected != API_PROVIDER:
+                    API_PROVIDER = detected
+                config["api_key"] = API_KEY
+                config["api_provider"] = API_PROVIDER
+                save_config(config)
+                QMessageBox.information(dialog, "API Key Saved", f"{get_provider_display_name()} API key has been saved successfully.")
+                dialog.accept()
+
+            def on_skip():
+                global API_KEY
                 API_KEY = None
-                QMessageBox.information(window, "Offline Mode", "Running in offline mode. Only dictionary lookups will be available.\n\nYou can add an API key later in Preferences.")
+                QMessageBox.information(dialog, "Offline Mode", "Running in offline mode. Only dictionary lookups will be available.\n\nYou can add an API key later in Preferences.")
+                dialog.reject()
+
+            enter_btn.clicked.connect(on_enter)
+            skip_btn.clicked.connect(on_skip)
+            dialog.exec_()
 
         # Deck Dropdown
         deck_layout = QHBoxLayout()
@@ -849,7 +949,7 @@ QProgressBar::chunk {
             try:
                 # Only check internet if we have an API key and might need it
                 if API_KEY and not is_connected():
-                    QMessageBox.critical(window, "No Internet", "An internet connection is required to use Gemini API.\n\nYou can still use offline dictionary mode if available.")
+                    QMessageBox.critical(window, "No Internet", f"An internet connection is required to use {get_provider_display_name()} API.\n\nYou can still use offline dictionary mode if available.")
                     return
 
                 words_raw = input_box.toPlainText()
@@ -920,19 +1020,19 @@ QProgressBar::chunk {
                         for attempt in range(4):
                             gemini_data = query_gemini(word, translation_language)
                             if "error" not in gemini_data:
-                                source = "AI (Gemini)"
-                                print(f"[DEBUG] Gemini raw data for '{word}':\n{json.dumps(gemini_data, indent=2, ensure_ascii=False)}")
+                                source = f"AI ({get_provider_display_name()})"
+                                print(f"[DEBUG] {get_provider_display_name()} raw data for '{word}':\n{json.dumps(gemini_data, indent=2, ensure_ascii=False)}")
                                 break
 
                     if "error" in gemini_data:
                         error_text = gemini_data.get("error", "Unknown error")
-                        output_box.append(f"Gemini failed for: {word}\nDetails: {error_text}\n")
-                        print(f"[GEMINI ERROR] Word '{word}': {error_text}")
+                        output_box.append(f"{get_provider_display_name()} failed for: {word}\nDetails: {error_text}\n")
+                        print(f"[AI ERROR] Word '{word}': {error_text}")
                         progress_bar.setValue(progress_bar.value() + 1)
                         continue
 
                     if is_duplicate(gemini_data.get("base_d", ""), gemini_data.get("base_a", "")):
-                        output_box.append(f"Skipped duplicate: {gemini_data.get('base_d', '')}\n")
+                        output_box.append(f"⚠️ Skipped duplicate: {gemini_data.get('base_d', '')} (already in Anki — enable 'Allow Duplicate Notes' in Preferences to override)\n")
                         progress_bar.setValue(progress_bar.value() + 1)
                         continue
 
@@ -942,7 +1042,12 @@ QProgressBar::chunk {
                     status = "✓" if success else "✗"
                     meaning_display = f"{gemini_data.get('base_e', '')}"
                     source_display = f"[{source}]" if success else ""
-                    output_box.append(f"{status} {gemini_data.get('base_d', word)} → {meaning_display} {source_display}\n")
+                    if success:
+                        output_box.append(f"{status} {gemini_data.get('base_d', word)} → {meaning_display} {source_display}\n")
+                    elif "duplicate" in msg.lower():
+                        output_box.append(f"{status} {gemini_data.get('base_d', word)} — duplicate already in Anki (enable 'Allow Duplicate Notes' in Preferences to override)\n")
+                    else:
+                        output_box.append(f"{status} {gemini_data.get('base_d', word)} — {msg}\n")
                     progress_bar.setValue(progress_bar.value() + 1)
 
                 # Set progress bar style: yellow if some fail, blue if all succeed
@@ -1019,8 +1124,15 @@ QProgressBar::chunk {
         preferences_tab = QWidget()
         preferences_main_layout = QVBoxLayout()
 
-        api_label = QLabel("Gemini API Key:")
+        api_label = QLabel("API Key:")
         api_input_layout = QHBoxLayout()
+        
+        # Provider dropdown in preferences
+        provider_label = QLabel("AI Provider:")
+        provider_dropdown = QComboBox()
+        provider_dropdown.addItems(["Gemini", "OpenAI"])
+        provider_dropdown.setCurrentText("OpenAI" if API_PROVIDER == "openai" else "Gemini")
+        
         api_input = QLineEdit()
         api_input.setPlaceholderText(API_KEY[:5] + "..." if API_KEY else "")
         save_btn = QPushButton("Save API Key")
@@ -1098,17 +1210,27 @@ QProgressBar::chunk {
         on_language_changed()
 
         def save_preferences():
+            global API_KEY, API_PROVIDER
             new_key = api_input.text().strip()
             if not new_key:
-                QMessageBox.warning(window, "Missing API Key", "The Gemini API Key cannot be blank.")
+                QMessageBox.warning(window, "Missing API Key", "The API Key cannot be blank.")
                 return
+            # Determine provider from dropdown
+            API_PROVIDER = "openai" if provider_dropdown.currentText() == "OpenAI" else "gemini"
+            # Auto-detect provider from key format
+            detected = detect_provider_from_key(new_key)
+            if detected and detected != API_PROVIDER:
+                API_PROVIDER = detected
+                provider_dropdown.setCurrentText("OpenAI" if API_PROVIDER == "openai" else "Gemini")
+            API_KEY = new_key
             config["api_key"] = new_key
+            config["api_provider"] = API_PROVIDER
             config["allow_duplicates"] = allow_dupes_checkbox.isChecked()
             config["include_notes"] = include_notes_checkbox.isChecked()
             config["translation_language"] = self.translation_dropdown.currentText()
             print("Saving config with translation_language =", config["translation_language"])
             save_config(config)
-            QMessageBox.information(window, "Saved", "Preferences updated successfully.")
+            QMessageBox.information(window, "Saved", f"Preferences updated successfully.\nProvider: {get_provider_display_name()}")
             api_input.clear()
             api_input.setPlaceholderText(new_key[:5] + "...")
             self.translation_dropdown.setCurrentText(config.get("translation_language", "English"))
@@ -1116,7 +1238,14 @@ QProgressBar::chunk {
         save_btn.clicked.connect(save_preferences)
 
         # Now, add widgets in the new order:
-        # 1. Gemini API Key label and input field
+        # 1. AI Provider dropdown
+        provider_row_layout = QHBoxLayout()
+        provider_row_layout.addWidget(provider_label)
+        provider_row_layout.addWidget(provider_dropdown)
+        provider_row_layout.addStretch()
+        preferences_main_layout.addLayout(provider_row_layout)
+
+        # 2. API Key label and input field
         api_input_layout.addWidget(api_label)
         api_input_layout.addWidget(api_input)
         api_input_layout.addWidget(save_btn)
@@ -1335,7 +1464,7 @@ QProgressBar::chunk {
             QApplication.processEvents()
             try:
                 if not is_connected():
-                    QMessageBox.critical(None, "No Internet", "An internet connection is required to use Gemini.")
+                    QMessageBox.critical(None, "No Internet", f"An internet connection is required to use {get_provider_display_name()}.")
                     return
 
                 sentences_raw = phrase_input_box.toPlainText()
@@ -1370,25 +1499,12 @@ QProgressBar::chunk {
                         "```"
                     )
 
-                    GEMINI_ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
-                    headers = {'Content-Type': 'application/json'}
-                    body = {
-                        "contents": [{"parts": [{"text": prompt}]}]
-                    }
-
                     try:
-                        response = requests.post(GEMINI_ENDPOINT, headers=headers, json=body)
-                        result = response.json()
-                        if "candidates" not in result:
-                            phrase_output_box.append(f"Gemini error: {result.get('error', 'No candidates returned')}\n")
-                            phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
-                            continue
-
-                        content = result["candidates"][0]["content"]["parts"][0]["text"]
-                        print(f"[DEBUG] Gemini raw content:\n{content}")
+                        content = query_ai_raw(prompt)
+                        print(f"[DEBUG] {get_provider_display_name()} raw content:\n{content}")
                         match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
                         if not match:
-                            phrase_output_box.append("❌ JSON block not found in Gemini response.\n")
+                            phrase_output_box.append("❌ JSON block not found in AI response.\n")
                             phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
                             continue
 
@@ -1401,13 +1517,13 @@ QProgressBar::chunk {
                             continue
 
                         if "error" in parsed:
-                            phrase_output_box.append(f"⚠️ Gemini error: {parsed['error']}\n")
+                            phrase_output_box.append(f"⚠️ {get_provider_display_name()} error: {parsed['error']}\n")
                             phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
                             continue
 
                         required_keys = ["german", "translation"]
                         if not all(parsed.get(k, "").strip() for k in required_keys):
-                            phrase_output_box.append(f"❌ Incomplete Gemini response. Missing 'german' or 'translation'. Parsed keys: {list(parsed.keys())}\n")
+                            phrase_output_box.append(f"❌ Incomplete AI response. Missing 'german' or 'translation'. Parsed keys: {list(parsed.keys())}\n")
                             phrase_progress_bar.setValue(phrase_progress_bar.value() + 1)
                             continue
 

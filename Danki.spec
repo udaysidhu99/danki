@@ -5,7 +5,12 @@ a = Analysis(
     ['danki_app.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('dictionary/german_english_dict_20k.json', 'dictionary'),
+        ('Danki Template Deck.apkg', '.'),
+        ('githubstar_banner.png', '.'),
+        ('icon.ico', '.'),
+    ],
     hiddenimports=['edge_tts', 'asyncio'],
     hookspath=[],
     hooksconfig={},

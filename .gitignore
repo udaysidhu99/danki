@@ -33,6 +33,8 @@ build/
 dictionary/*.log
 dictionary/*_errors.log
 dictionary/german_english_dict_10k_part_*.json
+dictionary/german_english_dict_next_10k_part_*.json
+dictionary/checkpoint_*.json
 dictionary/monitor_progress.sh
 
 # Temporary files
