@@ -27,7 +27,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='danki_app',
+    name='Danki',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

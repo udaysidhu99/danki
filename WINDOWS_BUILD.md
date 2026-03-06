@@ -1,218 +1,172 @@
-# Windows Build Guide - Danki v1.2
+# Danki — Windows Build Guide (v2.0.0-beta.1)
 
-Complete step-by-step instructions for building Danki on Windows for release preparation.
+> Complete build instructions for Windows. Written for both human developers and AI coding assistants (Copilot, Claude, etc.).
 
-## Prerequisites Setup
+---
 
-### 1. Python Installation
-- Install **Python 3.8-3.13** (3.14 also supported)
-- Download from [python.org](https://python.org/downloads/)
-- ✅ **Important**: Check "Add Python to PATH" during installation
+## Quick Build (Copy-Paste)
 
-### 2. VSCode Setup
-- Open VSCode with the Danki repository
-- Open integrated terminal: `Ctrl+`` or **Terminal → New Terminal**
-- Ensure you're in the project root directory
-
-### 3. Verify Installation
-```bash
-python --version
-pip --version
+```powershell
+git clone https://github.com/udaysidhu99/danki.git
+cd danki
+pip install PyQt5 requests edge-tts pyinstaller
+pyinstaller danki_app.spec --clean --noconfirm
+# Output: dist\Danki.exe
 ```
 
-## Dependency Installation
+---
 
-### Option A: Direct Installation
-```bash
-# Core build dependencies
-pip install pyinstaller pyinstaller-hooks-contrib
+## Prerequisites
 
-# Application dependencies
-pip install PyQt5 requests edge-tts asyncio pathlib
+### 1. Python 3.10+
+- Download: https://www.python.org/downloads/
+- ✅ **Check "Add Python to PATH"** during installation
+- Verify: `python --version`
+
+### 2. Git
+- Download: https://git-scm.com/download/win
+- Keep defaults during install
+- Verify: `git --version`
+
+### 3. VS Code (optional)
+- Download: https://code.visualstudio.com/
+- Install Python extension
+
+---
+
+## Build Steps
+
+### 1. Clone the repository
+```powershell
+git clone https://github.com/udaysidhu99/danki.git
+cd danki
 ```
 
-### Option B: Virtual Environment (Recommended)
-```bash
-# Create virtual environment
-python -m venv danki-build
-danki-build\Scripts\activate
-
-# Install dependencies
-pip install pyinstaller pyinstaller-hooks-contrib
-pip install PyQt5 requests edge-tts asyncio pathlib
+### 2. Install Python dependencies
+```powershell
+pip install PyQt5 requests edge-tts pyinstaller
 ```
 
-## Pre-Build Verification
-
-### 1. Test Application Locally
-```bash
+### 3. Verify the app runs from source
+```powershell
 python danki_app.py
 ```
+The GUI should launch with the first-run API key dialog. Close after confirming.
 
-**Verify these features work:**
-- ✅ WordMaster: Enter a German word and process it
-- ✅ PhraseMaster: Translate a sentence
-- ✅ Preferences: Settings load/save correctly
-- ✅ TTS Audio: German pronunciation works
-- ✅ API Connection: Gemini API responds (if configured)
-
-### 2. Check File Dependencies
-```bash
-# Verify these files exist:
-dir icon.ico          # Windows icon file
-dir danki_app.spec     # Windows build spec
-dir danki_app.py       # Main application
+### 4. Check required files exist
+```powershell
+dir icon.ico
+dir danki_app.spec
+dir danki_app.py
+dir dictionary\german_english_dict_20k.json
+dir "Danki Template Deck.apkg"
+dir githubstar_banner.png
 ```
 
-## Build Process
-
-### 1. Clean Previous Builds
-```bash
-# Remove old build artifacts
-rmdir /s /q build 2>nul
-rmdir /s /q dist 2>nul
+### 5. Build the executable
+```powershell
+pyinstaller danki_app.spec --clean --noconfirm
 ```
 
-### 2. Build Executable
-```bash
-# Use Windows-specific spec file
-pyinstaller danki_app.spec
+Output: `dist\Danki.exe` (~80-100MB single file)
+
+### 6. Test the executable
+```powershell
+dist\Danki.exe
 ```
 
-**Expected output:**
-- Build files in `build/` directory  
-- Final executable: `dist/danki_app.exe`
-- Build should complete without errors
+---
 
-### 3. Build Verification
-```bash
-# Check executable was created
-dir dist\danki_app.exe
+## Spec Files
 
-# Check file size (should be ~50-100MB)
-```
+| File | Platform | Output | Type |
+|------|----------|--------|------|
+| `Danki.spec` | macOS | `dist/Danki.app` | Folder bundle |
+| `danki_app.spec` | Windows | `dist/Danki.exe` | Single file |
+
+### What's bundled in the Windows exe
+- `dictionary/german_english_dict_20k.json` — 15,973 word offline dictionary
+- `Danki Template Deck.apkg` — Anki template deck for first-time users
+- `githubstar_banner.png` — GitHub star banner image
+- `icon.ico` — Windows application icon
+
+---
 
 ## Post-Build Testing
 
-### 1. Icon Verification ✨
-**This is crucial - the main fix for v1.2:**
+### Test Checklist
+- [ ] App launches without errors
+- [ ] First-launch popup appears (if no API key saved) with provider dropdown
+- [ ] WordMaster: enter a German word → processes correctly
+- [ ] PhraseMaster: enter a sentence → translates
+- [ ] Preferences: API provider dropdown (Gemini/OpenAI), all settings save/load
+- [ ] Duplicate words show feedback message with Preferences hint
+- [ ] TTS audio plays (requires internet for edge-tts)
+- [ ] Update checker: Help → Check for Updates shows "Up to Date"
+- [ ] Custom Danki icon displays on exe (not Python logo)
 
-1. Navigate to `dist/` folder in Windows Explorer
-2. **Check file icon** - should show custom Danki icon, NOT Python logo
-3. **If still showing Python icon:**
-   - Copy `danki_app.exe` to Desktop
-   - Restart Windows Explorer: `Ctrl+Shift+Esc` → Processes → Windows Explorer → Restart
-   - Check icon again
+### Clean System Test
+Copy `Danki.exe` to a machine without Python installed — it should run standalone.
 
-### 2. Functionality Testing
-```bash
-# Run the executable
-cd dist
-danki_app.exe
+---
+
+## Release Packaging
+
+```powershell
+mkdir danki-v2.0.0-beta.1-windows
+copy dist\Danki.exe danki-v2.0.0-beta.1-windows\
+copy README.md danki-v2.0.0-beta.1-windows\
+copy "Danki Template Deck.apkg" danki-v2.0.0-beta.1-windows\
 ```
 
-**Test checklist:**
-- ✅ Application launches without errors
-- ✅ GUI appears with correct layout
-- ✅ WordMaster processes German words
-- ✅ PhraseMaster translates sentences  
-- ✅ TTS audio generation works
-- ✅ Preferences can be opened/modified
-- ✅ All buttons and inputs respond
-
-### 3. Clean System Testing
-- Copy `danki_app.exe` to a machine **without Python installed**
-- Verify it runs independently
-
-## Release Preparation
-
-### 1. Version Verification
-Check that version matches v1.2.0:
-```bash
-# Check update.json
-type update.json | findstr version
-```
-
-### 2. Final Package
-```bash
-# Create release folder
-mkdir danki-v1.2-windows
-copy dist\danki_app.exe danki-v1.2-windows\
-copy README.md danki-v1.2-windows\ 
-copy "Danki Template Deck.apkg" danki-v1.2-windows\
-```
-
-### 3. Distribution Testing
-- Test executable in different Windows versions if available
-- Verify custom icon displays correctly across different systems
-- Test with Windows Defender / antivirus software
+---
 
 ## Troubleshooting
 
-### Common Issues
+### `pip` not found
+Python wasn't added to PATH. Reinstall and check "Add Python to PATH".
 
-**❌ Icon still shows Python logo:**
-```bash
-# Solution 1: Clear Windows icon cache
+### `ModuleNotFoundError`
+```powershell
+pip install PyQt5 requests edge-tts pyinstaller
+```
+
+### PyInstaller can't find `icon.ico`
+Run from the repo root (`cd danki`), not a subfolder.
+
+### Dictionary not found at runtime
+Verify `dictionary/german_english_dict_20k.json` exists before building. The spec bundles it automatically.
+
+### Icon shows Python logo instead of Danki
+```powershell
+# Clear Windows icon cache
 ie4uinit.exe -show
-
-# Solution 2: Copy exe to new location
-copy danki_app.exe danki_fixed.exe
+# Or copy exe to a new location to force icon refresh
 ```
 
-**❌ "Module not found" errors:**
-```bash
-# Add missing modules to spec file
-# Edit danki_app.spec, add to hiddenimports:
-hiddenimports=['missing_module_name'],
-```
+### Antivirus flags the exe
+Common with PyInstaller single-file builds. The exe is safe — it's Python packed into a binary. Whitelist it in your AV.
 
-**❌ Build fails with Qt errors:**
-```bash
-# Reinstall PyQt5
-pip uninstall PyQt5
-pip install PyQt5
-```
-
-**❌ Edge-TTS not working:**
-- Ensure internet connection during build and runtime
-- Edge-TTS requires online connectivity
-
-### Build Optimization
-```bash
-# For smaller executable (optional)
-pyinstaller danki_app.spec --exclude-module matplotlib --exclude-module scipy
-```
-
-## Verification Checklist
-
-Before releasing:
-- [ ] Executable icon displays correctly (custom Danki icon)
-- [ ] Application launches on clean Windows system
-- [ ] WordMaster processes German vocabulary
-- [ ] PhraseMaster translates phrases
-- [ ] TTS audio generation functions
-- [ ] Preferences save/load properly
-- [ ] No Python installation required to run
-- [ ] File size reasonable (~50-100MB)
-- [ ] Version number correct (v1.2.0)
+### Edge-TTS not working
+Requires internet connectivity. There is no native TTS fallback on Windows (unlike macOS which falls back to `say`).
 
 ---
 
-## Quick Reference Commands
+## Architecture Notes (for AI Assistants)
 
-```bash
-# Full build sequence
-rmdir /s /q build dist 2>nul
-pyinstaller danki_app.spec
-dist\danki_app.exe
+| Component | Details |
+|-----------|---------|
+| **Version** | `v2.0.0-beta.1` |
+| **AI Providers** | Gemini (`gemini-2.5-flash-lite`) + OpenAI (`gpt-4o-mini`) |
+| **Provider selection** | Auto-detected from key format, or manual in Preferences |
+| **Config path** | `%USERPROFILE%\.danki\gemini_config.json` |
+| **TTS** | `edge-tts` (async, requires internet) |
+| **Anki integration** | AnkiConnect addon at `http://localhost:8765` |
+| **Dictionary** | 15,973 entries, offline lookup with AI fallback |
+| **Update checker** | Fetches `update.json` from `main` branch on GitHub |
 
-# Test built executable
-cd dist && danki_app.exe
-
-# Check icon in Explorer
-explorer dist
-```
-
----
-**Note**: The key fix in v1.2 is the corrected icon syntax in `danki_app.spec` - changing from `icon=['icon.ico']` to `icon='icon.ico'` which should resolve the Windows icon display issue.
+### Key rules
+- **Never commit API keys** — `.gitignore` covers `apikeys*`
+- Windows spec is `danki_app.spec`, macOS spec is `Danki.spec`
+- Always use `--clean --noconfirm` flags with PyInstaller
+- Test the exe, not just `python danki_app.py` — bundling can surface missing imports
