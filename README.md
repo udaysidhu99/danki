@@ -35,7 +35,7 @@ Download the latest release from the [**Releases page**](https://github.com/uday
 | Platform | File | Notes |
 |----------|------|-------|
 | **macOS** (Apple Silicon) | `Danki-v2.0.0-beta.1-macos.zip` | Unzip → move to Applications → right-click → Open |
-| **Windows** (x64) | `Danki-v2.0.0-beta.1-windows.zip` | Unzip the folder → run `Danki.exe` |
+| **Windows** (x64) | `Danki-v2.0.0-beta.1-windows.zip` | Unzip the folder → run `Danki.exe` (may take a few seconds to launch) |
 | **Template Deck** | `Danki Template Deck.apkg` | Import into Anki before first use |
 
 ---
