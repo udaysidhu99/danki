@@ -1,6 +1,11 @@
 # Configuration files with sensitive data
 gemini_config.json
 dictionary/apikeys.txt
+apikeys*.rtf
+apikeys*.txt
+
+# Joomla (not part of this project)
+Joomla*
 
 # Python build artifacts
 __pycache__/
@@ -40,4 +45,3 @@ dictionary/monitor_progress.sh
 # Temporary files
 *.tmp
 *.bak
-apikeys.txt.rtf
