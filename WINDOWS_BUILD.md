@@ -10,8 +10,8 @@
 git clone https://github.com/udaysidhu99/danki.git
 cd danki
 pip install PyQt5 requests edge-tts pyinstaller
-pyinstaller danki_app.spec --clean --noconfirm
-# Output: dist\Danki.exe
+pyinstaller danki_app_onedir.spec --clean --noconfirm
+# Output: dist\Danki\Danki.exe
 ```
 
 ---
@@ -56,7 +56,7 @@ The GUI should launch with the first-run API key dialog. Close after confirming.
 ### 4. Check required files exist
 ```powershell
 dir icon.ico
-dir danki_app.spec
+dir danki_app_onedir.spec
 dir danki_app.py
 dir dictionary\german_english_dict_20k.json
 dir "Danki Template Deck.apkg"
@@ -65,14 +65,14 @@ dir githubstar_banner.png
 
 ### 5. Build the executable
 ```powershell
-pyinstaller danki_app.spec --clean --noconfirm
+pyinstaller danki_app_onedir.spec --clean --noconfirm
 ```
 
-Output: `dist\Danki.exe` (~80-100MB single file)
+Output: `dist\Danki\Danki.exe` (recommended, stable taskbar icon)
 
 ### 6. Test the executable
 ```powershell
-dist\Danki.exe
+dist\Danki\Danki.exe
 ```
 
 ---
@@ -83,6 +83,7 @@ dist\Danki.exe
 |------|----------|--------|------|
 | `Danki.spec` | macOS | `dist/Danki.app` | Folder bundle |
 | `danki_app.spec` | Windows | `dist/Danki.exe` | Single file |
+| `danki_app_onedir.spec` | Windows | `dist/Danki/Danki.exe` | Folder bundle (recommended) |
 
 ### What's bundled in the Windows exe
 - `dictionary/german_english_dict_20k.json` — 15,973 word offline dictionary
@@ -106,7 +107,7 @@ dist\Danki.exe
 - [ ] Custom Danki icon displays on exe (not Python logo)
 
 ### Clean System Test
-Copy `Danki.exe` to a machine without Python installed — it should run standalone.
+Copy the `dist\Danki\` folder to a machine without Python installed — it should run standalone.
 
 ---
 
@@ -114,7 +115,7 @@ Copy `Danki.exe` to a machine without Python installed — it should run standal
 
 ```powershell
 mkdir danki-v2.0.0-beta.1-windows
-copy dist\Danki.exe danki-v2.0.0-beta.1-windows\
+robocopy dist\Danki danki-v2.0.0-beta.1-windows\Danki /E
 copy README.md danki-v2.0.0-beta.1-windows\
 copy "Danki Template Deck.apkg" danki-v2.0.0-beta.1-windows\
 ```
@@ -167,6 +168,6 @@ Requires internet connectivity. There is no native TTS fallback on Windows (unli
 
 ### Key rules
 - **Never commit API keys** — `.gitignore` covers `apikeys*`
-- Windows spec is `danki_app.spec`, macOS spec is `Danki.spec`
+- Windows spec is `danki_app_onedir.spec`, macOS spec is `Danki.spec`
 - Always use `--clean --noconfirm` flags with PyInstaller
 - Test the exe, not just `python danki_app.py` — bundling can surface missing imports

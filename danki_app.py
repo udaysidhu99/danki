@@ -177,6 +177,71 @@ def resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
+
+def apply_windows_window_icon(window, icon_path):
+    """Force icon onto the native Win32 window handle for reliable taskbar display."""
+    if sys.platform != "win32" or not os.path.exists(icon_path):
+        return
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        WM_SETICON = 0x0080
+        ICON_SMALL = 0
+        ICON_BIG = 1
+        IMAGE_ICON = 1
+        LR_LOADFROMFILE = 0x0010
+        GCLP_HICON = -14
+        GCLP_HICONSM = -34
+        GWL_EXSTYLE = -20
+        WS_EX_TOOLWINDOW = 0x00000080
+        WS_EX_APPWINDOW = 0x00040000
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_NOZORDER = 0x0004
+        SWP_FRAMECHANGED = 0x0020
+
+        hwnd = int(window.winId())
+        hicon_small = user32.LoadImageW(None, icon_path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+        hicon_big = user32.LoadImageW(None, icon_path, IMAGE_ICON, 256, 256, LR_LOADFROMFILE)
+
+        # Ensure this top-level window is treated as an app window in taskbar grouping.
+        exstyle = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+        exstyle = (exstyle & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+        user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exstyle)
+
+        if hicon_small:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
+            user32.SetClassLongPtrW(hwnd, GCLP_HICONSM, hicon_small)
+        if hicon_big:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_big)
+            user32.SetClassLongPtrW(hwnd, GCLP_HICON, hicon_big)
+
+        # Re-apply frame so Windows updates the taskbar entry/icon metadata.
+        user32.SetWindowPos(
+            hwnd,
+            0,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+        )
+    except Exception as e:
+        print(f"[Icon] Failed to set native Windows icon: {e}")
+
+
+def refresh_window_icon(window, app_icon, icon_path):
+    """Re-assert Qt and native icon state (Windows) after window state changes."""
+    try:
+        window.setWindowIcon(app_icon)
+        if window.windowHandle() is not None:
+            window.windowHandle().setIcon(app_icon)
+    except Exception as e:
+        print(f"[Icon] Failed to refresh Qt window icon: {e}")
+
+    apply_windows_window_icon(window, icon_path)
+
 CONFIG_PATH = Path(os.path.expanduser("~/.danki/gemini_config.json"))
 
 # --- Unified config handling ---
@@ -195,12 +260,68 @@ def load_config():
     config.setdefault("use_edge_tts", False)
     config.setdefault("always_use_api", False)
     config.setdefault("use_advanced_cards", False)
+    config.setdefault("windows_dark_mode", False)
     return config
 
 def save_config(config):
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w") as f:
         json.dump(config, f)
+
+
+def get_windows_dark_stylesheet():
+    """Return a compact dark stylesheet used only for Windows opt-in dark mode."""
+    return """
+QWidget {
+    background-color: #1e1e1e;
+    color: #e8e8e8;
+}
+QTabWidget::pane {
+    border: 1px solid #3a3a3a;
+}
+QTabBar::tab {
+    background: #2a2a2a;
+    color: #e8e8e8;
+    padding: 6px 10px;
+    border: 1px solid #3a3a3a;
+}
+QTabBar::tab:selected {
+    background: #3a3a3a;
+}
+QLineEdit, QTextEdit, QComboBox {
+    background-color: #2b2b2b;
+    color: #f0f0f0;
+    border: 1px solid #4a4a4a;
+    selection-background-color: #2f6fdf;
+}
+QPushButton {
+    background-color: #2f2f2f;
+    color: #f0f0f0;
+    border: 1px solid #4a4a4a;
+    padding: 4px 10px;
+}
+QPushButton:hover {
+    background-color: #3a3a3a;
+}
+QPushButton:disabled {
+    color: #8a8a8a;
+    border-color: #3a3a3a;
+}
+QMenuBar, QMenu {
+    background-color: #242424;
+    color: #e8e8e8;
+}
+QCheckBox {
+    color: #e8e8e8;
+}
+"""
+
+
+def apply_windows_dark_mode(app, enabled):
+    """Apply dark mode only on Windows when enabled by user preference."""
+    if sys.platform != "win32":
+        return
+    app.setStyleSheet(get_windows_dark_stylesheet() if enabled else "")
 
 # Convenience wrappers for backward compatibility
 def save_api_key(api_key, allow_duplicates=True, include_notes=True):
@@ -756,15 +877,25 @@ def run_gui():
         if sys.platform == "win32":
             import ctypes
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            QtWidgets.QApplication.setAttribute(Qt.AA_NativeWindows, True)
         QtWidgets.QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
         QtWidgets.QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
         app = QApplication(sys.argv)
-        window = QWidget()
-        window.setWindowIcon(QtGui.QIcon(resource_path("icon.ico")))
+        apply_windows_dark_mode(app, config.get("windows_dark_mode", False))
+        icon_path = resource_path("icon.ico")
+        app_icon = QtGui.QIcon(icon_path)
+        app.setApplicationName("Danki")
+        app.setWindowIcon(app_icon)
+        window = QtWidgets.QMainWindow()
+        window.setWindowTitle("Danki")
+        window.setWindowIcon(app_icon)
+        central_widget = QWidget()
+        window.setCentralWidget(central_widget)
 
         # Menu bar with Preferences
-        menu_bar = QtWidgets.QMenuBar()
+        menu_bar = QtWidgets.QMenuBar(window)
         preferences_menu = menu_bar.addMenu("Preferences")
+        window.setMenuBar(menu_bar)
 
         def open_preferences():
             QMessageBox.information(window, "Preferences", "Preferences dialog would open here.")
@@ -795,6 +926,7 @@ def run_gui():
             # Create a custom dialog with provider selection and Skip option
             dialog = QDialog(window)
             dialog.setWindowTitle("AI Provider Setup")
+            dialog.setWindowIcon(app_icon)
             dialog.setMinimumWidth(400)
             dlg_layout = QVBoxLayout()
 
@@ -1289,6 +1421,18 @@ QProgressBar::chunk {
         use_edge_tts_checkbox.setChecked(config.get("use_edge_tts", False))
         use_edge_tts_checkbox.stateChanged.connect(lambda state: update_config_value("use_edge_tts", bool(state)))
         preferences_main_layout.addWidget(use_edge_tts_checkbox)
+
+        if sys.platform == "win32":
+            windows_dark_mode_checkbox = QCheckBox("Enable Dark Mode (Windows only)")
+            windows_dark_mode_checkbox.setChecked(config.get("windows_dark_mode", False))
+
+            def on_windows_dark_mode_changed(state):
+                enabled = bool(state)
+                update_config_value("windows_dark_mode", enabled)
+                apply_windows_dark_mode(app, enabled)
+
+            windows_dark_mode_checkbox.stateChanged.connect(on_windows_dark_mode_changed)
+            preferences_main_layout.addWidget(windows_dark_mode_checkbox)
         
         edge_tts_note = QLabel("Note: Falls back to macOS say if Edge TTS fails")
         edge_tts_note.setStyleSheet("color: #888; font-size: 10px; margin-left: 20px;")
@@ -1636,10 +1780,14 @@ QProgressBar::chunk {
 
         layout.addWidget(tabs)
 
-        window.setLayout(layout)
+        central_widget.setLayout(layout)
         # Slightly shorter default height so it fits on smaller screens
         window.resize(500, 440)
         window.show()
+        refresh_window_icon(window, app_icon, icon_path)
+        QTimer.singleShot(100, lambda: refresh_window_icon(window, app_icon, icon_path))
+        QTimer.singleShot(400, lambda: refresh_window_icon(window, app_icon, icon_path))
+        QTimer.singleShot(1000, lambda: refresh_window_icon(window, app_icon, icon_path))
 
         def check_for_update():
             # Respect config setting
@@ -1654,8 +1802,9 @@ QProgressBar::chunk {
                 url = data.get("url", "").strip()
 
                 if remote_version and remote_version != CURRENT_VERSION:
-                    msg_box = QMessageBox()
+                    msg_box = QMessageBox(window)
                     msg_box.setWindowTitle("Update Available")
+                    msg_box.setWindowIcon(app_icon)
                     msg_box.setTextFormat(Qt.RichText)
                     msg_box.setText(f"{message}<br><br><a href='{url}'>View update details</a>")
                     msg_box.setStandardButtons(QMessageBox.Ok)
